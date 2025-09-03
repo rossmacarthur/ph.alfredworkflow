@@ -7,9 +7,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let query = env::args().nth(1);
 
     // Create an item to show in the Alfred drop down.
-    let item = powerpack::Item::new("Hello world!")
-        .subtitle(format!("Your query was '{query:?}'"))
-        .icon(powerpack::Icon::with_type("public.script"));
+    let item = powerpack::Item::new("Hello world!").subtitle(format!("Your query was '{query:?}'"));
 
     // Output the item to Alfred!
     powerpack::output(iter::once(item))?;
