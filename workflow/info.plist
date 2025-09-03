@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>io.macarthur.ross.ph</string>
+	<key>connections</key>
+	<dict>
+		<key>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</string>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>Ross MacArthur</string>
+	<key>description</key>
+	<string>Search for Phabricator/Phorge diffs, repos, and more</string>
+	<key>name</key>
+	<string>Phabricator</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>clipboardtext</key>
+				<string>{query}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.output.clipboard</string>
+			<key>uid</key>
+			<string>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>keyword</key>
+				<string>ph</string>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuemode</key>
+				<integer>2</integer>
+				<key>runningsubtext</key>
+				<string>Loading...</string>
+				<key>scriptfile</key>
+				<string>ph-alfredworkflow</string>
+				<key>title</key>
+				<string>Search</string>
+				<key>type</key>
+				<integer>8</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</string>
+		</dict>
+	</array>
+	<key>uidata</key>
+	<dict>
+		<key>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</key>
+		<dict>
+			<key>xpos</key>
+			<integer>50</integer>
+			<key>ypos</key>
+			<integer>50</integer>
+		</dict>
+		<key>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</key>
+		<dict>
+			<key>xpos</key>
+			<integer>225</integer>
+			<key>ypos</key>
+			<integer>50</integer>
+		</dict>
+	</dict>
+</dict>
+</plist>

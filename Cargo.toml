@@ -1,0 +1,8 @@
+[package]
+name = "ph-alfredworkflow"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+powerpack = "0.7.0"
