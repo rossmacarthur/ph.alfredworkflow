@@ -1,0 +1,190 @@
+use std::iter;
+use std::sync::LazyLock;
+use std::time::Duration;
+
+use anyhow::{Context as _, Result, bail};
+use constcat::concat;
+use powerpack::cache;
+use serde::de::DeserializeOwned;
+use serde_json as json;
+
+use crate::config::Config;
+
+const USER_AGENT: &str = concat!(crate::PKG_NAME, "/", crate::PKG_VERSION);
+
+static CACHE: LazyLock<cache::Cache> = LazyLock::new(|| {
+    cache::Builder::new()
+        .ttl(Duration::from_secs(60))
+        .initial_poll(Duration::from_millis(500))
+        .build()
+});
+
+#[derive(Debug, Clone)]
+pub struct User {
+    pub phid: String,
+    pub handle: String,
+    pub real_name: String,
+}
+
+/// Fetches the user ID for a given username.
+pub fn users(config: &Config) -> Result<Vec<User>> {
+    let path = "/user.search";
+    let form = &[("order", "newest")];
+    let result = CACHE.query(
+        cache::Query::new("users")
+            .ttl(Duration::from_secs(24 * 60 * 60)) // 24 hours
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<User> {
+        Ok(User {
+            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
+            handle: lookup(&r, "/fields/username").context("failed to extract `username`")?,
+            real_name: lookup(&r, "/fields/realName").context("failed to extract `realName`")?,
+        })
+    };
+
+    lookup::<Vec<json::Value>>(&result, "/result/data")?
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse user"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct Repo {
+    pub name: String,
+    pub description: Option<String>,
+    pub uri: String,
+}
+
+/// Fetches the repositories.
+pub fn repos(config: &Config) -> Result<Vec<Repo>> {
+    let path = "/repository.query";
+    let form = &[("order", "committed")];
+    let result = CACHE.query(
+        cache::Query::new("repos")
+            .ttl(Duration::from_secs(60 * 60))
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<Repo> {
+        Ok(Repo {
+            name: lookup(&r, "/name").context("failed to extract `name`")?,
+            description: lookup(&r, "/description").context("failed to extract `description`")?,
+            uri: lookup(&r, "/uri").context("failed to extract `uri`")?,
+        })
+    };
+
+    lookup::<Vec<json::Value>>(&result, "/result")?
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse repo"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct Diff {
+    pub id_title: String,
+    pub uri: String,
+    pub status: String,
+    pub author_phid: String,
+    pub updated: jiff::Timestamp,
+}
+
+/// Fetches the open diffs
+pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
+    let path = "/differential.revision.search";
+    let form = &[
+        ("constraints[statuses][]", "needs-review"),
+        ("constraints[statuses][]", "needs-revision"),
+        ("constraints[statuses][]", "changes-planned"),
+        ("constraints[statuses][]", "accepted"),
+        ("order", "updated"),
+    ];
+    let result = CACHE.query(
+        cache::Query::new("diffs")
+            .ttl(Duration::from_secs(60 * 60))
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<Diff> {
+        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
+        let title: String = lookup(&r, "/fields/title").context("failed to extract `title`")?;
+        let id_title = format!("D{}: {}", id, title);
+        Ok(Diff {
+            id_title,
+            uri: lookup(&r, "/fields/uri").context("failed to extract `uri`")?,
+            status: lookup(&r, "/fields/status/name").context("failed to extract `status`")?,
+            author_phid: lookup(&r, "/fields/authorPHID")
+                .context("failed to extract `authorPHID`")?,
+            updated: jiff::Timestamp::from_second(
+                lookup(&r, "/fields/dateModified").context("failed to extract `dateModified`")?,
+            )?,
+        })
+    };
+
+    lookup::<Vec<json::Value>>(&result, "/result/data")?
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse diff"))
+        .collect()
+}
+
+fn checksum(config: &Config, path: &str, form: &[(&str, &str)]) -> [u8; 20] {
+    use sha1::*;
+    let mut hasher = Sha1::new();
+    hasher.update(&config.api_token);
+    hasher.update(&config.api_url);
+    hasher.update(path);
+    for (k, v) in form {
+        hasher.update(k);
+        hasher.update(v);
+    }
+    hasher.finalize().into()
+}
+
+fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Value> {
+    let agent = ureq::config::Config::builder()
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        )
+        .build()
+        .new_agent();
+
+    let url = format!("{}{}", config.api_url, path);
+
+    let form = iter::once(("api.token", config.api_token.as_str())).chain(form.iter().copied());
+
+    let mut resp = agent
+        .post(&url)
+        .header("Accept", "application/json")
+        .header("User-Agent", USER_AGENT)
+        .send_form(form)?;
+
+    if !resp.status().is_success() {
+        bail!("HTTP {}", resp.status());
+    }
+    let data: json::Value = resp.body_mut().read_json()?;
+
+    if let Some(err_code) = data.pointer("/error_code")
+        && !err_code.is_null()
+    {
+        let err_info: String = lookup(&data, "/error_info").unwrap_or_default();
+        bail!("Error code {}: {}", err_code, err_info);
+    }
+
+    Ok(data)
+}
+
+fn lookup<T>(value: &json::Value, ptr: &str) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    let v = value
+        .pointer(ptr)
+        .with_context(|| format!("failed to lookup `{ptr}` in `{value:?}`"))?;
+    Ok(json::from_value(v.clone())?)
+}

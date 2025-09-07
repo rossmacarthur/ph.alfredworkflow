@@ -10,7 +10,13 @@
 		<array>
 			<dict>
 				<key>destinationuid</key>
-				<string>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</string>
+				<string>E814E836-58B0-4AA8-A18F-602E007F9854</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
 			</dict>
 		</array>
 	</dict>
@@ -18,6 +24,8 @@
 	<string>Ross MacArthur</string>
 	<key>description</key>
 	<string>Search for Phabricator/Phorge diffs, repos, and more</string>
+	<key>disabled</key>
+	<false/>
 	<key>name</key>
 	<string>Phabricator</string>
 	<key>objects</key>
@@ -25,31 +33,59 @@
 		<dict>
 			<key>config</key>
 			<dict>
-				<key>clipboardtext</key>
-				<string>{query}</string>
+				<key>browser</key>
+				<string></string>
+				<key>skipqueryencode</key>
+				<false/>
+				<key>skipvarencode</key>
+				<false/>
+				<key>spaces</key>
+				<string></string>
+				<key>url</key>
+				<string></string>
 			</dict>
 			<key>type</key>
-			<string>alfred.workflow.output.clipboard</string>
+			<string>alfred.workflow.action.openurl</string>
 			<key>uid</key>
-			<string>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</string>
+			<string>E814E836-58B0-4AA8-A18F-602E007F9854</string>
+			<key>version</key>
+			<integer>1</integer>
 		</dict>
 		<dict>
 			<key>config</key>
 			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
 				<key>argumenttreatemptyqueryasnil</key>
 				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
 				<key>argumenttype</key>
 				<integer>1</integer>
+				<key>escaping</key>
+				<integer>0</integer>
 				<key>keyword</key>
 				<string>ph</string>
+				<key>queuedelaycustom</key>
+				<integer>1</integer>
 				<key>queuedelayimmediatelyinitially</key>
 				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
 				<key>queuemode</key>
 				<integer>2</integer>
 				<key>runningsubtext</key>
 				<string>Loading...</string>
+				<key>script</key>
+				<string></string>
+				<key>scriptargtype</key>
+				<integer>0</integer>
 				<key>scriptfile</key>
 				<string>ph-alfredworkflow</string>
+				<key>subtext</key>
+				<string></string>
 				<key>title</key>
 				<string>Search</string>
 				<key>type</key>
@@ -61,6 +97,8 @@
 			<string>alfred.workflow.input.scriptfilter</string>
 			<key>uid</key>
 			<string>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</string>
+			<key>version</key>
+			<integer>3</integer>
 		</dict>
 	</array>
 	<key>uidata</key>
@@ -68,17 +106,19 @@
 		<key>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</key>
 		<dict>
 			<key>xpos</key>
-			<integer>50</integer>
+			<real>50</real>
 			<key>ypos</key>
-			<integer>50</integer>
+			<real>50</real>
 		</dict>
-		<key>F3DCC84C-B1EB-4B79-8B64-141C0CB537E3</key>
+		<key>E814E836-58B0-4AA8-A18F-602E007F9854</key>
 		<dict>
 			<key>xpos</key>
-			<integer>225</integer>
+			<real>225</real>
 			<key>ypos</key>
-			<integer>50</integer>
+			<real>50</real>
 		</dict>
 	</dict>
+	<key>userconfigurationconfig</key>
+	<array/>
 </dict>
 </plist>
