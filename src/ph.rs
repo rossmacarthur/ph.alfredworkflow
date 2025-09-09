@@ -26,7 +26,7 @@ pub struct User {
     pub real_name: String,
 }
 
-/// Fetches the user ID for a given username.
+/// Fetches all the users.
 pub fn users(config: &Config) -> Result<Vec<User>> {
     let path = "/user.search";
     let form = &[("order", "newest")];
@@ -49,6 +49,27 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
         .into_iter()
         .map(|r| parse(r).context("failed to parse user"))
         .collect()
+}
+
+pub fn whoami(config: &Config) -> Result<User> {
+    let path = "/user.whoami";
+    let form = &[];
+    let result = CACHE.query(
+        cache::Query::new("whoami")
+            .ttl(Duration::from_secs(24 * 60 * 60)) // 24 hours
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<User> {
+        Ok(User {
+            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
+            handle: lookup(&r, "/userName").context("failed to extract `userName`")?,
+            real_name: lookup(&r, "/realName").context("failed to extract `realName`")?,
+        })
+    };
+
+    parse(lookup::<json::Value>(&result, "/result")?).context("failed to parse user")
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +125,7 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
     ];
     let result = CACHE.query(
         cache::Query::new("diffs")
-            .ttl(Duration::from_secs(60 * 60))
+            .ttl(Duration::from_secs(60))
             .checksum(checksum(config, path, form))
             .update_fn(|| fetch(config, path, form)),
     )?;
@@ -128,6 +149,56 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
     lookup::<Vec<json::Value>>(&result, "/result/data")?
         .into_iter()
         .map(|r| parse(r).context("failed to parse diff"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct Task {
+    pub id_title: String,
+    pub uri: String,
+    pub owner_phid: Option<String>,
+    pub updated: jiff::Timestamp,
+}
+
+/// Fetches the open tasks
+pub fn tasks(config: &Config) -> Result<Vec<Task>> {
+    let user = whoami(config)?;
+
+    let path = "/maniphest.search";
+    let form = &[
+        ("constraints[statuses][]", "open"),
+        ("constraints[assigned][]", &user.phid),
+        ("order", "updated"),
+    ];
+
+    let result = CACHE.query(
+        cache::Query::new("tasks")
+            .ttl(Duration::from_secs(60))
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<Task> {
+        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
+        let title: String = lookup(&r, "/fields/name").context("failed to extract `name`")?;
+        let id_title = format!("T{}: {}", id, title);
+        let uri = format!("{}/T{}", config.api_url.trim_end_matches("/api/"), id);
+        let owner_phid: Option<String> =
+            lookup(&r, "/fields/ownerPHID").context("failed to extract `ownerPHID`")?;
+        let updated = jiff::Timestamp::from_second(
+            lookup(&r, "/fields/dateModified").context("failed to extract `dateModified`")?,
+        )?;
+        Ok(Task {
+            id_title,
+            uri,
+            owner_phid,
+            updated,
+        })
+    };
+
+    lookup::<Vec<json::Value>>(&result, "/result/data")?
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse task"))
         .collect()
 }
 

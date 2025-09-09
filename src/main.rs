@@ -15,6 +15,7 @@ use powerpack::logger;
 use crate::config::Config;
 use crate::ph::Diff;
 use crate::ph::Repo;
+use crate::ph::Task;
 use crate::ph::User;
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
@@ -31,6 +32,7 @@ struct Context {
 enum Command {
     Repos,
     Diffs,
+    Tasks,
 }
 
 fn main() -> Result<()> {
@@ -64,7 +66,7 @@ fn run() -> Result<()> {
         .map(str::trim)
         .map(str::to_lowercase);
 
-    let cmds = [Command::Repos, Command::Diffs];
+    let cmds = [Command::Repos, Command::Diffs, Command::Tasks];
 
     let items = match arg {
         // If no argument is given then just list the available commands
@@ -105,6 +107,7 @@ impl Command {
         match self {
             Command::Repos => "repos",
             Command::Diffs => "diffs",
+            Command::Tasks => "tasks",
         }
     }
 
@@ -112,6 +115,7 @@ impl Command {
         match self {
             Command::Repos => "Search repositories",
             Command::Diffs => "Search active revisions",
+            Command::Tasks => "Search maniphest tasks",
         }
     }
 
@@ -133,6 +137,11 @@ impl Command {
                 .into_iter()
                 .filter(|d| d.matches(ctx, query))
                 .map(|d| d.into_item(ctx))
+                .collect(),
+            Command::Tasks => ph::tasks(&ctx.config)?
+                .into_iter()
+                .filter(|t| t.matches(query))
+                .map(|t| t.into_item(ctx))
                 .collect(),
         };
         Ok(items)
@@ -179,6 +188,23 @@ impl Diff {
         let status = self.status.to_lowercase();
         let subtitle = format!("{ago} by {author}, {status}");
         Item::new(self.id_title).subtitle(subtitle).arg(self.uri)
+    }
+}
+
+impl Task {
+    fn matches(&self, query: &str) -> bool {
+        self.id_title.to_lowercase().contains(query)
+    }
+
+    fn into_item(self, ctx: &Context) -> Item {
+        let ago = human::format_ago((ctx.now - self.updated).try_into().unwrap());
+        let owner = self
+            .owner_phid
+            .as_deref()
+            .and_then(|phid| ctx.users.get(phid).map(|u| u.handle.as_str()))
+            .unwrap_or("unassigned");
+        let subtitle = format!("updated {ago}, assigned to {owner}");
+        Item::new(self.id_title).arg(self.uri).subtitle(subtitle)
     }
 }
 
