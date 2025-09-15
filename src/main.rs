@@ -4,6 +4,7 @@ mod ph;
 
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Write as _;
 use std::io;
 use std::time::Duration;
 
@@ -150,7 +151,7 @@ impl Command {
                 .collect(),
             Command::Tasks => ph::tasks(&ctx.config)?
                 .into_iter()
-                .filter(|t| t.matches(query))
+                .filter(|t| t.matches(ctx, query))
                 .map(|t| t.into_item(ctx))
                 .collect(),
         };
@@ -180,10 +181,9 @@ impl Diff {
     fn matches(&self, ctx: &Context, query: &str) -> bool {
         query.split_whitespace().all(|q| {
             if let Some(q) = q.strip_prefix('@') {
-                match ctx.users.get(&self.author_phid) {
-                    Some(user) => user.matches(q),
-                    None => false,
-                }
+                ctx.users
+                    .get(&self.author_phid)
+                    .is_some_and(|user| user.matches(q))
             } else {
                 self.id_title.to_lowercase().contains(q)
             }
@@ -207,18 +207,30 @@ impl Diff {
 }
 
 impl Task {
-    fn matches(&self, query: &str) -> bool {
-        self.id_title.to_lowercase().contains(query)
+    fn matches(&self, ctx: &Context, query: &str) -> bool {
+        query.split_whitespace().all(|q| {
+            if let Some(q) = q.strip_prefix('@') {
+                self.owner_phid
+                    .as_ref()
+                    .and_then(|phid| ctx.users.get(phid))
+                    .is_some_and(|user| user.matches(q))
+            } else {
+                self.id_title.to_lowercase().contains(q)
+            }
+        })
     }
 
     fn into_item(self, ctx: &Context) -> Item {
         let ago = human::format_ago((ctx.now - self.updated).try_into().unwrap());
-        let owner = self
+        let mut subtitle = format!("updated {ago}");
+        if let Some(owner) = self
             .owner_phid
-            .as_deref()
-            .and_then(|phid| ctx.users.get(phid).map(|u| u.handle.as_str()))
-            .unwrap_or("unassigned");
-        let subtitle = format!("updated {ago}, assigned to {owner}");
+            .as_ref()
+            .and_then(|phid| ctx.users.get(phid))
+            .map(|user| user.handle.as_str())
+        {
+            write!(&mut subtitle, ", assigned to {owner}").expect("fmt write never fails");
+        }
         Item::new(self.id_title)
             .arg(self.uri)
             .subtitle(subtitle)

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use constcat::concat;
 use powerpack::cache;
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json as json;
 
 use crate::config::Config;
@@ -30,11 +30,11 @@ pub struct User {
 pub fn users(config: &Config) -> Result<Vec<User>> {
     let path = "/user.search";
     let form = &[("order", "newest")];
-    let result = CACHE.query(
+    let items = CACHE.query(
         cache::Query::new("users")
             .ttl(Duration::from_secs(24 * 60 * 60)) // 24 hours
             .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
+            .update_fn(|| fetch_all(config, path, form)),
     )?;
 
     let parse = |r| -> Result<User> {
@@ -45,31 +45,10 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
         })
     };
 
-    lookup::<Vec<json::Value>>(&result, "/result/data")?
+    items
         .into_iter()
         .map(|r| parse(r).context("failed to parse user"))
         .collect()
-}
-
-pub fn whoami(config: &Config) -> Result<User> {
-    let path = "/user.whoami";
-    let form = &[];
-    let result = CACHE.query(
-        cache::Query::new("whoami")
-            .ttl(Duration::from_secs(24 * 60 * 60)) // 24 hours
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
-    )?;
-
-    let parse = |r| -> Result<User> {
-        Ok(User {
-            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
-            handle: lookup(&r, "/userName").context("failed to extract `userName`")?,
-            real_name: lookup(&r, "/realName").context("failed to extract `realName`")?,
-        })
-    };
-
-    parse(lookup::<json::Value>(&result, "/result")?).context("failed to parse user")
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +77,10 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
         })
     };
 
-    lookup::<Vec<json::Value>>(&result, "/result")?
+    result
+        .as_array()
+        .context("expected array of repos")?
+        .to_owned()
         .into_iter()
         .map(|r| parse(r).context("failed to parse repo"))
         .collect()
@@ -123,11 +105,11 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
         ("constraints[statuses][]", "accepted"),
         ("order", "updated"),
     ];
-    let result = CACHE.query(
+    let items = CACHE.query(
         cache::Query::new("diffs")
             .ttl(Duration::from_secs(60))
             .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
+            .update_fn(|| fetch_all(config, path, form)),
     )?;
 
     let parse = |r| -> Result<Diff> {
@@ -146,7 +128,7 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
         })
     };
 
-    lookup::<Vec<json::Value>>(&result, "/result/data")?
+    items
         .into_iter()
         .map(|r| parse(r).context("failed to parse diff"))
         .collect()
@@ -162,20 +144,14 @@ pub struct Task {
 
 /// Fetches the open tasks
 pub fn tasks(config: &Config) -> Result<Vec<Task>> {
-    let user = whoami(config)?;
-
     let path = "/maniphest.search";
-    let form = &[
-        ("constraints[statuses][]", "open"),
-        ("constraints[assigned][]", &user.phid),
-        ("order", "updated"),
-    ];
+    let form = &[("constraints[statuses][]", "open"), ("order", "updated")];
 
     let result = CACHE.query(
         cache::Query::new("tasks")
-            .ttl(Duration::from_secs(60))
+            .ttl(Duration::from_secs(60 * 60))
             .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
+            .update_fn(|| fetch_all(config, path, form)),
     )?;
 
     let parse = |r| -> Result<Task> {
@@ -196,7 +172,7 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
         })
     };
 
-    lookup::<Vec<json::Value>>(&result, "/result/data")?
+    result
         .into_iter()
         .map(|r| parse(r).context("failed to parse task"))
         .collect()
@@ -215,16 +191,70 @@ fn checksum(config: &Config, path: &str, form: &[(&str, &str)]) -> [u8; 20] {
     hasher.finalize().into()
 }
 
-fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Value> {
-    let agent = ureq::config::Config::builder()
+static AGENT_CONFIG: LazyLock<ureq::config::Config> = LazyLock::new(|| {
+    ureq::config::Config::builder()
         .tls_config(
             ureq::tls::TlsConfig::builder()
                 .provider(ureq::tls::TlsProvider::NativeTls)
                 .build(),
         )
         .build()
-        .new_agent();
+});
 
+fn fetch_all(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<Vec<json::Value>> {
+    #[derive(Debug, Clone, Deserialize)]
+    #[allow(dead_code)] // fields are used to assert deserialization
+    struct Cursor {
+        after: Option<String>,
+        before: Option<String>,
+        limit: u32,
+        order: String,
+    }
+
+    let agent = AGENT_CONFIG.new_agent();
+    let url = format!("{}{}", config.api_url, path);
+
+    let mut items = Vec::new();
+    let mut after_id: Option<String> = None;
+
+    loop {
+        let form = {
+            let mut f = form.to_vec();
+            f.push(("api.token", config.api_token.as_str()));
+            if let Some(ref after_id) = after_id {
+                f.push(("after", after_id.as_str()));
+            }
+            f
+        };
+
+        let mut resp = agent
+            .post(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", USER_AGENT)
+            .send_form(form)?;
+        if !resp.status().is_success() {
+            bail!("HTTP {}", resp.status());
+        }
+
+        let data: json::Value = resp.body_mut().read_json()?;
+        check_error(&data)?;
+
+        items.extend(
+            lookup::<Vec<json::Value>>(&data, "/result/data")
+                .context("failed to extract `data`")?,
+        );
+
+        let cursor =
+            lookup::<Cursor>(&data, "/result/cursor").context("failed to extract `cursor`")?;
+        match cursor.after {
+            Some(item_id) => after_id = Some(item_id),
+            None => break Ok(items),
+        }
+    }
+}
+
+fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Value> {
+    let agent = AGENT_CONFIG.new_agent();
     let url = format!("{}{}", config.api_url, path);
 
     let form = iter::once(("api.token", config.api_token.as_str())).chain(form.iter().copied());
@@ -234,20 +264,24 @@ fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Val
         .header("Accept", "application/json")
         .header("User-Agent", USER_AGENT)
         .send_form(form)?;
-
     if !resp.status().is_success() {
         bail!("HTTP {}", resp.status());
     }
-    let data: json::Value = resp.body_mut().read_json()?;
 
+    let data: json::Value = resp.body_mut().read_json()?;
+    check_error(&data)?;
+
+    lookup::<json::Value>(&data, "/result").context("failed to extract `result`")
+}
+
+fn check_error(data: &json::Value) -> Result<()> {
     if let Some(err_code) = data.pointer("/error_code")
         && !err_code.is_null()
     {
-        let err_info: String = lookup(&data, "/error_info").unwrap_or_default();
+        let err_info: String = lookup(data, "/error_info").unwrap_or_default();
         bail!("Error code {}: {}", err_code, err_info);
     }
-
-    Ok(data)
+    Ok(())
 }
 
 fn lookup<T>(value: &json::Value, ptr: &str) -> Result<T>
