@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use constcat::concat;
+use powerpack::Icon;
 use powerpack::Item;
 use powerpack::logger;
 
@@ -119,11 +120,20 @@ impl Command {
         }
     }
 
+    fn icon(&self) -> &'static str {
+        match self {
+            Command::Repos => "repo.png",
+            Command::Diffs => "diff.png",
+            Command::Tasks => "task.png",
+        }
+    }
+
     fn into_item(self) -> Item {
         let name = self.name();
         Item::new(name)
             .subtitle(self.subtitle())
             .autocomplete(format!("{name} "))
+            .icon(Icon::with_image(self.icon()))
     }
 
     fn exec(&self, ctx: &Context, query: &str) -> Result<Vec<Item>> {
@@ -156,7 +166,9 @@ impl Repo {
     }
 
     fn into_item(self) -> Item {
-        let mut item = Item::new(self.name).arg(self.uri);
+        let mut item = Item::new(self.name)
+            .arg(self.uri)
+            .icon(Icon::with_image("repo.png"));
         if let Some(desc) = self.description {
             item = item.subtitle(desc);
         };
@@ -187,7 +199,10 @@ impl Diff {
             .unwrap_or("unknown");
         let status = self.status.to_lowercase();
         let subtitle = format!("{ago} by {author}, {status}");
-        Item::new(self.id_title).subtitle(subtitle).arg(self.uri)
+        Item::new(self.id_title)
+            .subtitle(subtitle)
+            .arg(self.uri)
+            .icon(Icon::with_image("diff.png"))
     }
 }
 
@@ -204,7 +219,10 @@ impl Task {
             .and_then(|phid| ctx.users.get(phid).map(|u| u.handle.as_str()))
             .unwrap_or("unassigned");
         let subtitle = format!("updated {ago}, assigned to {owner}");
-        Item::new(self.id_title).arg(self.uri).subtitle(subtitle)
+        Item::new(self.id_title)
+            .arg(self.uri)
+            .subtitle(subtitle)
+            .icon(Icon::with_image("task.png"))
     }
 }
 
