@@ -16,6 +16,7 @@ use powerpack::logger;
 
 use crate::config::Config;
 use crate::ph::Diff;
+use crate::ph::Document;
 use crate::ph::Repo;
 use crate::ph::Task;
 use crate::ph::User;
@@ -35,6 +36,7 @@ enum Command {
     Repos,
     Diffs,
     Tasks,
+    Wiki,
 }
 
 fn main() -> Result<()> {
@@ -68,7 +70,12 @@ fn run() -> Result<()> {
         .map(str::trim)
         .map(str::to_lowercase);
 
-    let cmds = [Command::Repos, Command::Diffs, Command::Tasks];
+    let cmds = [
+        Command::Repos,
+        Command::Diffs,
+        Command::Tasks,
+        Command::Wiki,
+    ];
 
     let items = match arg {
         // If no argument is given then just list the available commands
@@ -110,6 +117,7 @@ impl Command {
             Command::Repos => "repos",
             Command::Diffs => "diffs",
             Command::Tasks => "tasks",
+            Command::Wiki => "wiki",
         }
     }
 
@@ -118,6 +126,7 @@ impl Command {
             Command::Repos => "Search repositories",
             Command::Diffs => "Search active revisions",
             Command::Tasks => "Search maniphest tasks",
+            Command::Wiki => "Search wiki pages",
         }
     }
 
@@ -126,6 +135,7 @@ impl Command {
             Command::Repos => "repo.png",
             Command::Diffs => "diff.png",
             Command::Tasks => "task.png",
+            Command::Wiki => "wiki.png",
         }
     }
 
@@ -153,6 +163,11 @@ impl Command {
                 .into_iter()
                 .filter(|t| t.matches(ctx, query))
                 .map(|t| t.into_item(ctx))
+                .collect(),
+            Command::Wiki => ph::documents(&ctx.config)?
+                .into_iter()
+                .filter(|d| d.matches(query))
+                .map(|d| d.into_item(ctx))
                 .collect(),
         };
         Ok(items)
@@ -197,7 +212,7 @@ impl Diff {
             .get(&self.author_phid)
             .map(|u| u.handle.as_str())
             .unwrap_or("unknown");
-        let status = self.status.to_lowercase();
+        let status = anycase::as_lower(self.status);
         let subtitle = format!("{ago} by {author}, {status}");
         Item::new(self.id_title)
             .subtitle(subtitle)
@@ -235,6 +250,28 @@ impl Task {
             .arg(self.uri)
             .subtitle(subtitle)
             .icon(Icon::with_image("task.png"))
+    }
+}
+
+impl Document {
+    fn matches(&self, query: &str) -> bool {
+        query.split_whitespace().all(|q| {
+            self.title.to_lowercase().contains(q)
+                || self.path.contains(q)
+                || self.content.to_lowercase().contains(q)
+        })
+    }
+
+    fn into_item(self, ctx: &Context) -> Item {
+        let path = format!("/w/{}", self.path.trim_start_matches('/'));
+        Item::new(self.title)
+            .arg(format!(
+                "{}{}",
+                ctx.config.api_url.trim_end_matches("/api/"),
+                path,
+            ))
+            .subtitle(path)
+            .icon(Icon::with_image("wiki.png"))
     }
 }
 

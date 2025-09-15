@@ -12,9 +12,13 @@ use crate::config::Config;
 
 const USER_AGENT: &str = concat!(crate::PKG_NAME, "/", crate::PKG_VERSION);
 
+const TTL_MINUTE: Duration = Duration::from_secs(60);
+const TTL_HOUR: Duration = Duration::from_secs(60 * 60);
+const TTL_DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
 static CACHE: LazyLock<cache::Cache> = LazyLock::new(|| {
     cache::Builder::new()
-        .ttl(Duration::from_secs(60))
+        .ttl(TTL_HOUR)
         .initial_poll(Duration::from_millis(500))
         .build()
 });
@@ -32,7 +36,7 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
     let form = &[("order", "newest")];
     let items = CACHE.query(
         cache::Query::new("users")
-            .ttl(Duration::from_secs(24 * 60 * 60)) // 24 hours
+            .ttl(TTL_DAY)
             .checksum(checksum(config, path, form))
             .update_fn(|| fetch_all(config, path, form)),
     )?;
@@ -64,7 +68,7 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
     let form = &[("order", "committed")];
     let result = CACHE.query(
         cache::Query::new("repos")
-            .ttl(Duration::from_secs(60 * 60))
+            .ttl(TTL_DAY)
             .checksum(checksum(config, path, form))
             .update_fn(|| fetch(config, path, form)),
     )?;
@@ -107,7 +111,7 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
     ];
     let items = CACHE.query(
         cache::Query::new("diffs")
-            .ttl(Duration::from_secs(60))
+            .ttl(TTL_MINUTE)
             .checksum(checksum(config, path, form))
             .update_fn(|| fetch_all(config, path, form)),
     )?;
@@ -119,7 +123,7 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
         Ok(Diff {
             id_title,
             uri: lookup(&r, "/fields/uri").context("failed to extract `uri`")?,
-            status: lookup(&r, "/fields/status/name").context("failed to extract `status`")?,
+            status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
             author_phid: lookup(&r, "/fields/authorPHID")
                 .context("failed to extract `authorPHID`")?,
             updated: jiff::Timestamp::from_second(
@@ -149,7 +153,7 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
 
     let result = CACHE.query(
         cache::Query::new("tasks")
-            .ttl(Duration::from_secs(60 * 60))
+            .ttl(TTL_HOUR)
             .checksum(checksum(config, path, form))
             .update_fn(|| fetch_all(config, path, form)),
     )?;
@@ -175,6 +179,44 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
     result
         .into_iter()
         .map(|r| parse(r).context("failed to parse task"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct Document {
+    pub title: String,
+    pub path: String,
+    pub content: String,
+}
+
+/// Fetches wiki documents
+pub fn documents(config: &Config) -> Result<Vec<Document>> {
+    let path = "/phriction.document.search";
+    let form = &[("order", "newest"), ("attachments[content]", "true")];
+    let items = CACHE.query(
+        cache::Query::new("documents")
+            .ttl(TTL_DAY)
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch_all(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<Document> {
+        Ok(Document {
+            title: lookup(&r, "/attachments/content/title").context("failed to extract `title`")?,
+            path: lookup(&r, "/attachments/content/path").context("failed to extract `path`")?,
+            content: lookup(&r, "/attachments/content/content/raw")
+                .context("failed to extract `content`")?,
+        })
+    };
+
+    items
+        .into_iter()
+        .filter(|r| {
+            let typ: String = lookup(r, "/type").unwrap_or_default();
+            let status: String = lookup(r, "/fields/status/value").unwrap_or_default();
+            typ == "WIKI" && status == "active"
+        })
+        .map(|r| parse(r).context("failed to parse document"))
         .collect()
 }
 
