@@ -51,14 +51,14 @@ fn main() -> Result<()> {
         let item = if let Some(cache::QueryError::Miss) = err.downcast_ref::<cache::QueryError>() {
             Item::new(format!("Warning: {err}"))
                 .subtitle("The workflow is still loading data from Phabricator/Phorge")
-                .icon(Icon::with_image("warning.png"))
+                .icon(Icon::with_image("./assets/warning.png"))
         } else {
             Item::new(format!("Error: {err}"))
                 .subtitle(
                     "The workflow errored! \
                      You might want to try debugging it or checking the logs",
                 )
-                .icon(Icon::with_image("error.png"))
+                .icon(Icon::with_image("./assets/error.png"))
         };
         output([item])?;
     }
@@ -148,10 +148,10 @@ impl Command {
 
     fn icon(&self) -> &'static str {
         match self {
-            Self::Diffs => "diff.png",
-            Self::Tasks => "task.png",
-            Self::Wiki => "wiki.png",
-            Self::Repos => "repo.png",
+            Self::Diffs => "./assets/diff.png",
+            Self::Tasks => "./assets/task.png",
+            Self::Wiki => "./assets/wiki.png",
+            Self::Repos => "./assets/repo.png",
         }
     }
 
@@ -248,7 +248,7 @@ impl Diff {
         Item::new(format!("D{}: {}", self.id, self.title))
             .subtitle(subtitle)
             .arg(self.uri)
-            .icon(Icon::with_image("diff.png"))
+            .icon(Icon::with_image("./assets/diff.png"))
     }
 }
 
@@ -306,7 +306,7 @@ impl Task {
         Item::new(format!("T{}: {}", self.id, self.title))
             .arg(self.uri)
             .subtitle(subtitle)
-            .icon(Icon::with_image("task.png"))
+            .icon(Icon::with_image("./assets/task.png"))
     }
 }
 
@@ -344,7 +344,7 @@ impl Document {
                 path,
             ))
             .subtitle(path)
-            .icon(Icon::with_image("wiki.png"))
+            .icon(Icon::with_image("./assets/wiki.png"))
     }
 }
 
@@ -358,7 +358,7 @@ impl Repo {
     fn into_item(self) -> Item {
         let mut item = Item::new(self.name)
             .arg(self.uri)
-            .icon(Icon::with_image("repo.png"));
+            .icon(Icon::with_image("./assets/repo.png"));
         if let Some(desc) = self.description {
             item = item.subtitle(desc);
         };
