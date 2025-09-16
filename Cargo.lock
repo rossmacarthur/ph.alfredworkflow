@@ -454,6 +454,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itermore"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac87f762608cc2efb6f8f45e419c5047daa2e781a7b57b2ed1b30abf55549e06"
+
+[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -641,12 +647,15 @@ dependencies = [
  "anyhow",
  "constcat",
  "home",
+ "itermore",
  "jiff",
  "log",
  "powerpack",
  "serde",
  "serde_json",
  "sha1",
+ "strsim",
+ "then",
  "ureq",
 ]
 
@@ -942,6 +951,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
+name = "strsim"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -981,6 +996,12 @@ dependencies = [
  "rustix",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "then"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48ed51d496b818a158761fb6b75e24df2380588996e609afe3fd3993577ff628"
 
 [[package]]
 name = "thiserror"

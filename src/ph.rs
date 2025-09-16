@@ -27,7 +27,7 @@ static CACHE: LazyLock<cache::Cache> = LazyLock::new(|| {
 pub struct User {
     pub phid: String,
     pub handle: String,
-    pub real_name: String,
+    pub handle_lower: String,
 }
 
 /// Fetches all the users.
@@ -42,10 +42,12 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
     )?;
 
     let parse = |r| -> Result<User> {
+        let handle: String =
+            lookup(&r, "/fields/username").context("failed to extract `handle`")?;
         Ok(User {
             phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
-            handle: lookup(&r, "/fields/username").context("failed to extract `username`")?,
-            real_name: lookup(&r, "/fields/realName").context("failed to extract `realName`")?,
+            handle_lower: handle.to_lowercase(),
+            handle,
         })
     };
 
@@ -92,7 +94,9 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
 
 #[derive(Debug, Clone)]
 pub struct Diff {
-    pub id_title: String,
+    pub id: u32,
+    pub title: String,
+    pub title_lower: String,
     pub uri: String,
     pub status: String,
     pub author_phid: String,
@@ -119,9 +123,10 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
     let parse = |r| -> Result<Diff> {
         let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
         let title: String = lookup(&r, "/fields/title").context("failed to extract `title`")?;
-        let id_title = format!("D{}: {}", id, title);
         Ok(Diff {
-            id_title,
+            id,
+            title_lower: title.to_lowercase(),
+            title,
             uri: lookup(&r, "/fields/uri").context("failed to extract `uri`")?,
             status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
             author_phid: lookup(&r, "/fields/authorPHID")
@@ -140,9 +145,12 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
 
 #[derive(Debug, Clone)]
 pub struct Task {
-    pub id_title: String,
+    pub id: u32,
+    pub title: String,
+    pub title_lower: String,
     pub uri: String,
     pub owner_phid: Option<String>,
+    pub description_lower: String,
     pub updated: jiff::Timestamp,
 }
 
@@ -161,17 +169,21 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
     let parse = |r| -> Result<Task> {
         let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
         let title: String = lookup(&r, "/fields/name").context("failed to extract `name`")?;
-        let id_title = format!("T{}: {}", id, title);
         let uri = format!("{}/T{}", config.api_url.trim_end_matches("/api/"), id);
         let owner_phid: Option<String> =
             lookup(&r, "/fields/ownerPHID").context("failed to extract `ownerPHID`")?;
         let updated = jiff::Timestamp::from_second(
             lookup(&r, "/fields/dateModified").context("failed to extract `dateModified`")?,
         )?;
+        let description: String =
+            lookup(&r, "/fields/description/raw").context("failed to extract `description`")?;
         Ok(Task {
-            id_title,
+            id,
+            title_lower: title.to_lowercase(),
+            title,
             uri,
             owner_phid,
+            description_lower: description.to_lowercase(),
             updated,
         })
     };
@@ -184,9 +196,12 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
 
 #[derive(Debug, Clone)]
 pub struct Document {
-    pub title: String,
+    pub id: u32,
     pub path: String,
-    pub content: String,
+    pub path_lower: String,
+    pub title: String,
+    pub title_lower: String,
+    pub content_lower: String,
 }
 
 /// Fetches wiki documents
@@ -201,11 +216,20 @@ pub fn documents(config: &Config) -> Result<Vec<Document>> {
     )?;
 
     let parse = |r| -> Result<Document> {
+        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
+        let path: String =
+            lookup(&r, "/attachments/content/path").context("failed to extract `path`")?;
+        let title: String =
+            lookup(&r, "/attachments/content/title").context("failed to extract `title`")?;
+        let content: String = lookup(&r, "/attachments/content/content/raw")
+            .context("failed to extract `content`")?;
         Ok(Document {
-            title: lookup(&r, "/attachments/content/title").context("failed to extract `title`")?,
-            path: lookup(&r, "/attachments/content/path").context("failed to extract `path`")?,
-            content: lookup(&r, "/attachments/content/content/raw")
-                .context("failed to extract `content`")?,
+            id,
+            path_lower: path.to_lowercase(),
+            path,
+            title_lower: title.to_lowercase(),
+            title,
+            content_lower: content.to_lowercase(),
         })
     };
 

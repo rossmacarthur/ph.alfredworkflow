@@ -1,7 +1,9 @@
 mod config;
 mod human;
+mod ord_float;
 mod ph;
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
@@ -10,11 +12,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 use constcat::concat;
+use itermore::IterSorted as _;
 use powerpack::Icon;
 use powerpack::Item;
 use powerpack::logger;
+use then::Some as _;
 
 use crate::config::Config;
+use crate::ord_float::OrdFloat;
 use crate::ph::Diff;
 use crate::ph::Document;
 use crate::ph::Repo;
@@ -111,6 +116,9 @@ fn run() -> Result<()> {
     output(items)
 }
 
+trait CmpKey: Ord + Clone + Copy + Sized {}
+impl<T> CmpKey for T where T: Ord + Clone + Copy + Sized {}
+
 impl Command {
     fn name(&self) -> &'static str {
         match self {
@@ -153,21 +161,37 @@ impl Command {
                 .into_iter()
                 .filter(|r| r.matches(query))
                 .map(|r| r.into_item())
+                .take(20)
                 .collect(),
+
             Command::Diffs => ph::diffs(&ctx.config)?
                 .into_iter()
-                .filter(|d| d.matches(ctx, query))
-                .map(|d| d.into_item(ctx))
+                .filter_map(|d| {
+                    let (ok, cmp) = d.filter_cmp_key(ctx, query);
+                    ok.some((d, cmp))
+                })
+                .sorted_by_key(|&(_, cmp)| cmp)
+                .map(|(d, _)| d.into_item(ctx))
+                .take(20)
                 .collect(),
+
             Command::Tasks => ph::tasks(&ctx.config)?
                 .into_iter()
-                .filter(|t| t.matches(ctx, query))
-                .map(|t| t.into_item(ctx))
+                .filter_map(|t| {
+                    let (ok, cmp) = t.filter_cmp_key(ctx, query);
+                    ok.some((t, cmp))
+                })
+                .sorted_by_key(|&(_, cmp)| cmp)
+                .map(|(t, _)| t.into_item(ctx))
+                .take(20)
                 .collect(),
+
             Command::Wiki => ph::documents(&ctx.config)?
                 .into_iter()
                 .filter(|d| d.matches(query))
+                .sorted_by_key(|d| d.cmp_key(query))
                 .map(|d| d.into_item(ctx))
+                .take(20)
                 .collect(),
         };
         Ok(items)
@@ -193,16 +217,33 @@ impl Repo {
 }
 
 impl Diff {
-    fn matches(&self, ctx: &Context, query: &str) -> bool {
-        query.split_whitespace().all(|q| {
-            if let Some(q) = q.strip_prefix('@') {
-                ctx.users
-                    .get(&self.author_phid)
-                    .is_some_and(|user| user.matches(q))
-            } else {
-                self.id_title.to_lowercase().contains(q)
-            }
-        })
+    fn filter_cmp_key(&self, ctx: &Context, query: &str) -> (bool, impl CmpKey + use<>) {
+        let (handles, rest): (Vec<_>, Vec<_>) =
+            query.split_whitespace().partition(|q| q.starts_with('@'));
+
+        let filter_owner = handles.into_iter().all(|h| {
+            h.strip_prefix('@')
+                .map(|u| {
+                    ctx.users
+                        .get(&self.author_phid)
+                        .is_some_and(|user| user.matches(u))
+                })
+                .unwrap_or(false)
+        });
+
+        let filter =
+            query.is_empty() || (filter_owner && rest.iter().all(|q| self.title_lower.contains(q)));
+
+        let query = rest.join(" ");
+
+        let cmp = (
+            Reverse(filter_owner),
+            Reverse(self.title_lower.starts_with(&query)),
+            Reverse(self.title_lower.contains(&query)),
+            Reverse(self.updated),
+        );
+
+        (filter, cmp)
     }
 
     fn into_item(self, ctx: &Context) -> Item {
@@ -214,7 +255,7 @@ impl Diff {
             .unwrap_or("unknown");
         let status = anycase::as_lower(self.status);
         let subtitle = format!("{ago} by {author}, {status}");
-        Item::new(self.id_title)
+        Item::new(format!("D{}: {}", self.id, self.title))
             .subtitle(subtitle)
             .arg(self.uri)
             .icon(Icon::with_image("diff.png"))
@@ -222,17 +263,42 @@ impl Diff {
 }
 
 impl Task {
-    fn matches(&self, ctx: &Context, query: &str) -> bool {
-        query.split_whitespace().all(|q| {
-            if let Some(q) = q.strip_prefix('@') {
-                self.owner_phid
-                    .as_ref()
-                    .and_then(|phid| ctx.users.get(phid))
-                    .is_some_and(|user| user.matches(q))
-            } else {
-                self.id_title.to_lowercase().contains(q)
-            }
-        })
+    fn filter_cmp_key(&self, ctx: &Context, query: &str) -> (bool, impl CmpKey + use<>) {
+        let (handles, rest): (Vec<_>, Vec<_>) =
+            query.split_whitespace().partition(|q| q.starts_with('@'));
+
+        let filter_owner = handles.into_iter().all(|h| {
+            h.strip_prefix('@')
+                .map(|u| {
+                    self.owner_phid
+                        .as_ref()
+                        .and_then(|phid| ctx.users.get(phid))
+                        .is_some_and(|user| user.matches(u))
+                })
+                .unwrap_or(false)
+        });
+
+        let filter = query.is_empty()
+            || (filter_owner
+                && rest
+                    .iter()
+                    .all(|q| self.title_lower.contains(q) || self.description_lower.contains(q)));
+
+        let query = rest.join(" ");
+
+        let cmp = (
+            Reverse(filter_owner),
+            Reverse(self.title_lower.starts_with(&query)),
+            Reverse(self.title_lower.contains(&query)),
+            Reverse(self.description_lower.contains(&query)),
+            Reverse(OrdFloat({
+                let score = strsim::jaro_winkler(&self.title_lower, &query);
+                (score * 10.0).round() / 10.0
+            })),
+            Reverse(self.updated),
+        );
+
+        (filter, cmp)
     }
 
     fn into_item(self, ctx: &Context) -> Item {
@@ -244,9 +310,10 @@ impl Task {
             .and_then(|phid| ctx.users.get(phid))
             .map(|user| user.handle.as_str())
         {
-            write!(&mut subtitle, ", assigned to {owner}").expect("fmt write never fails");
+            write!(&mut subtitle, ", assigned to {owner}")
+                .expect("fmt write to string never fails");
         }
-        Item::new(self.id_title)
+        Item::new(format!("T{}: {}", self.id, self.title))
             .arg(self.uri)
             .subtitle(subtitle)
             .icon(Icon::with_image("task.png"))
@@ -255,11 +322,27 @@ impl Task {
 
 impl Document {
     fn matches(&self, query: &str) -> bool {
-        query.split_whitespace().all(|q| {
-            self.title.to_lowercase().contains(q)
-                || self.path.contains(q)
-                || self.content.to_lowercase().contains(q)
-        })
+        query.is_empty()
+            || query.split_whitespace().any(|q| {
+                self.path_lower.contains(q)
+                    || self.title_lower.contains(q)
+                    || self.content_lower.contains(q)
+            })
+    }
+
+    fn cmp_key(&self, query: &str) -> impl CmpKey + use<> {
+        (
+            Reverse(self.path_lower.starts_with(query)),
+            Reverse(self.title_lower.starts_with(query)),
+            Reverse(self.path_lower.contains(query)),
+            Reverse(self.title_lower.contains(query)),
+            Reverse(self.content_lower.contains(query)),
+            Reverse(OrdFloat({
+                let score = strsim::jaro_winkler(&self.title_lower, query);
+                (score * 10.0).round() / 10.0
+            })),
+            Reverse(self.id),
+        )
     }
 
     fn into_item(self, ctx: &Context) -> Item {
@@ -277,7 +360,7 @@ impl Document {
 
 impl User {
     fn matches(&self, query: &str) -> bool {
-        self.handle.to_lowercase().contains(query) || self.real_name.to_lowercase().contains(query)
+        self.handle_lower.starts_with(query)
     }
 }
 
