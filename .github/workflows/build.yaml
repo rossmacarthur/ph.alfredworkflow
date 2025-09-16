@@ -1,0 +1,97 @@
+name: build
+
+on: [push, pull_request]
+
+env:
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Test
+  # ---------------------------------------------------------------------------
+
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        toolchain: [stable, beta, nightly]
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.toolchain }}
+        components: clippy, rustfmt
+
+    - name: Rustfmt
+      run: cargo fmt -- --check
+
+    - name: Clippy
+      continue-on-error: ${{ matrix.toolchain == 'nightly' }}
+      run: cargo clippy --workspace --all-targets
+
+  # ---------------------------------------------------------------------------
+  # Check version against tag
+  # ---------------------------------------------------------------------------
+
+  prepare:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Calculate version from tag
+        id: version
+        run: echo "value=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Check tag against package version
+        run: |
+          grep '^version = "${{ steps.version.outputs.value }}"$' Cargo.toml
+          grep '<string>${{ steps.version.outputs.value }}</string>' workflow/info.plist
+
+  # ---------------------------------------------------------------------------
+  # Release to GitHub
+  # ---------------------------------------------------------------------------
+
+  release:
+    needs: prepare
+    runs-on: macos-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: extractions/setup-crate@v1
+        with:
+          owner: rossmacarthur
+          name: powerpack
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Calculate version from tag
+        id: version
+        run: echo "value=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Archive
+        id: archive
+        run: |
+          archive=ph-${{ needs.prepare.outputs.version }}-${{ matrix.target }}.alfredworkflow
+          powerpack package --target ${{ matrix.target }}
+          mv target/workflow/ph.alfredworkflow "$archive"
+          echo "path=$archive" >> $GITHUB_OUTPUT
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.archive.outputs.path }}
