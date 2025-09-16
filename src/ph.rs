@@ -2,10 +2,13 @@ use std::iter;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::Context as _;
+use anyhow::Result;
+use anyhow::bail;
 use constcat::concat;
 use powerpack::cache;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json as json;
 
 use crate::config::Config;

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
 
-use anyhow::{Context as _, Result};
+use anyhow::Context as _;
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json as json;
 

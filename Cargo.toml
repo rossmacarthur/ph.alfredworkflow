@@ -2,6 +2,7 @@
 name = "ph-alfredworkflow"
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.89.0"
 publish = false
 
 [dependencies]
@@ -19,3 +20,15 @@ sha1 = "0.10.6"
 strsim = "0.11.1"
 then = "0.1.0"
 ureq = { version = "3.1.0", features = ["native-tls", "json"] }
+
+[lints.rust]
+unknown_lints = "allow"
+elided_lifetimes_in_paths = "warn"
+let_underscore_drop = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+if_not_else = "warn"
+items_after_statements = "warn"
+semicolon_if_nothing_returned = "warn"
+use_self = "warn"

@@ -55,8 +55,7 @@ fn main() -> Result<()> {
         } else {
             Item::new(format!("Error: {err}"))
                 .subtitle(
-                    "The workflow errored! \
-                     You might want to try debugging it or checking the logs",
+                    "The workflow errored! You might want to try debugging it or checking the logs",
                 )
                 .icon(Icon::with_image("./assets/error.png"))
         };
