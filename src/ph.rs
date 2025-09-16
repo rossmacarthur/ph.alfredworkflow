@@ -44,12 +44,14 @@ pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
         ("constraints[statuses][]", "accepted"),
         ("order", "updated"),
     ];
-    let items = CACHE.query(
-        cache::Query::new("diffs")
-            .ttl(TTL_MINUTE)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch_all(config, path, form)),
-    )?;
+    let items = CACHE
+        .query(
+            cache::Query::new("diffs")
+                .ttl(TTL_MINUTE)
+                .checksum(checksum(config, path, form))
+                .update_fn(|| fetch_all(config, path, form)),
+        )
+        .context("failed to fetch diffs from cache")?;
 
     let parse = |r| -> Result<Diff> {
         let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
@@ -90,12 +92,14 @@ pub fn tasks(config: &Config) -> Result<Vec<Task>> {
     let path = "/maniphest.search";
     let form = &[("constraints[statuses][]", "open"), ("order", "updated")];
 
-    let result = CACHE.query(
-        cache::Query::new("tasks")
-            .ttl(TTL_HOUR)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch_all(config, path, form)),
-    )?;
+    let result = CACHE
+        .query(
+            cache::Query::new("tasks")
+                .ttl(TTL_HOUR)
+                .checksum(checksum(config, path, form))
+                .update_fn(|| fetch_all(config, path, form)),
+        )
+        .context("failed to fetch tasks from cache")?;
 
     let parse = |r| -> Result<Task> {
         let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
@@ -139,12 +143,14 @@ pub struct Document {
 pub fn documents(config: &Config) -> Result<Vec<Document>> {
     let path = "/phriction.document.search";
     let form = &[("order", "newest"), ("attachments[content]", "true")];
-    let items = CACHE.query(
-        cache::Query::new("documents")
-            .ttl(TTL_DAY)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch_all(config, path, form)),
-    )?;
+    let items = CACHE
+        .query(
+            cache::Query::new("documents")
+                .ttl(TTL_DAY)
+                .checksum(checksum(config, path, form))
+                .update_fn(|| fetch_all(config, path, form)),
+        )
+        .context("failed to fetch documents from cache")?;
 
     let parse = |r| -> Result<Document> {
         let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
@@ -186,12 +192,14 @@ pub struct Repo {
 pub fn repos(config: &Config) -> Result<Vec<Repo>> {
     let path = "/repository.query";
     let form = &[("order", "committed")];
-    let result = CACHE.query(
-        cache::Query::new("repos")
-            .ttl(TTL_DAY)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
-    )?;
+    let result = CACHE
+        .query(
+            cache::Query::new("repos")
+                .ttl(TTL_DAY)
+                .checksum(checksum(config, path, form))
+                .update_fn(|| fetch(config, path, form)),
+        )
+        .context("failed to fetch repos from cache")?;
 
     let parse = |r| -> Result<Repo> {
         Ok(Repo {
@@ -221,12 +229,14 @@ pub struct User {
 pub fn users(config: &Config) -> Result<Vec<User>> {
     let path = "/user.search";
     let form = &[("order", "newest")];
-    let items = CACHE.query(
-        cache::Query::new("users")
-            .ttl(TTL_DAY)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch_all(config, path, form)),
-    )?;
+    let items = CACHE
+        .query(
+            cache::Query::new("users")
+                .ttl(TTL_DAY)
+                .checksum(checksum(config, path, form))
+                .update_fn(|| fetch_all(config, path, form)),
+        )
+        .context("failed to fetch users from cache")?;
 
     let parse = |r| -> Result<User> {
         let handle: String =

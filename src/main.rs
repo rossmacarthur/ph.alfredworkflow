@@ -15,6 +15,7 @@ use constcat::concat;
 use itermore::IterSorted as _;
 use powerpack::Icon;
 use powerpack::Item;
+use powerpack::cache;
 use powerpack::logger;
 use then::Some as _;
 
@@ -46,11 +47,19 @@ enum Command {
 
 fn main() -> Result<()> {
     if let Err(err) = run() {
-        eprintln!("{err:#}");
-        let item = Item::new(format!("Error: {err}")).subtitle(
-            "The workflow errored! \
-             You might want to try debugging it or checking the logs.",
-        );
+        eprintln!("ERROR: {err:#}");
+        let item = if let Some(cache::QueryError::Miss) = err.downcast_ref::<cache::QueryError>() {
+            Item::new(format!("Warning: {err}"))
+                .subtitle("The workflow is still loading data from Phabricator/Phorge")
+                .icon(Icon::with_image("warning.png"))
+        } else {
+            Item::new(format!("Error: {err}"))
+                .subtitle(
+                    "The workflow errored! \
+                     You might want to try debugging it or checking the logs",
+                )
+                .icon(Icon::with_image("error.png"))
+        };
         output([item])?;
     }
     Ok(())
@@ -99,7 +108,7 @@ fn run() -> Result<()> {
                         .map(Command::into_item)
                         .collect();
                     if items.is_empty() {
-                        let item = Item::new("No command found");
+                        let item = Item::new(format!("No command found: '{cmd}'"));
                         return output([item]);
                     }
                     items
