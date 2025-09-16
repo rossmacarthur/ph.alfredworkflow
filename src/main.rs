@@ -38,10 +38,10 @@ struct Context {
 
 #[derive(Debug, Clone, Copy)]
 enum Command {
-    Repos,
     Diffs,
     Tasks,
     Wiki,
+    Repos,
 }
 
 fn main() -> Result<()> {
@@ -75,12 +75,7 @@ fn run() -> Result<()> {
         .map(str::trim)
         .map(str::to_lowercase);
 
-    let cmds = [
-        Command::Repos,
-        Command::Diffs,
-        Command::Tasks,
-        Command::Wiki,
-    ];
+    let cmds = Command::all();
 
     let items = match arg {
         // If no argument is given then just list the available commands
@@ -120,30 +115,34 @@ trait CmpKey: Ord + Clone + Copy + Sized {}
 impl<T> CmpKey for T where T: Ord + Clone + Copy + Sized {}
 
 impl Command {
+    fn all() -> [Self; 4] {
+        [Self::Diffs, Self::Tasks, Self::Wiki, Self::Repos]
+    }
+
     fn name(&self) -> &'static str {
         match self {
-            Command::Repos => "repos",
-            Command::Diffs => "diffs",
-            Command::Tasks => "tasks",
-            Command::Wiki => "wiki",
+            Self::Diffs => "diffs",
+            Self::Tasks => "tasks",
+            Self::Wiki => "wiki",
+            Self::Repos => "repos",
         }
     }
 
     fn subtitle(&self) -> &'static str {
         match self {
-            Command::Repos => "Search repositories",
-            Command::Diffs => "Search active revisions",
-            Command::Tasks => "Search maniphest tasks",
-            Command::Wiki => "Search wiki pages",
+            Self::Diffs => "Search active revisions",
+            Self::Tasks => "Search maniphest tasks",
+            Self::Wiki => "Search wiki pages",
+            Self::Repos => "Search repositories",
         }
     }
 
     fn icon(&self) -> &'static str {
         match self {
-            Command::Repos => "repo.png",
-            Command::Diffs => "diff.png",
-            Command::Tasks => "task.png",
-            Command::Wiki => "wiki.png",
+            Self::Diffs => "diff.png",
+            Self::Tasks => "task.png",
+            Self::Wiki => "wiki.png",
+            Self::Repos => "repo.png",
         }
     }
 
@@ -157,14 +156,7 @@ impl Command {
 
     fn exec(&self, ctx: &Context, query: &str) -> Result<Vec<Item>> {
         let items = match self {
-            Command::Repos => ph::repos(&ctx.config)?
-                .into_iter()
-                .filter(|r| r.matches(query))
-                .map(|r| r.into_item())
-                .take(20)
-                .collect(),
-
-            Command::Diffs => ph::diffs(&ctx.config)?
+            Self::Diffs => ph::diffs(&ctx.config)?
                 .into_iter()
                 .filter_map(|d| {
                     let (ok, cmp) = d.filter_cmp_key(ctx, query);
@@ -175,7 +167,7 @@ impl Command {
                 .take(20)
                 .collect(),
 
-            Command::Tasks => ph::tasks(&ctx.config)?
+            Self::Tasks => ph::tasks(&ctx.config)?
                 .into_iter()
                 .filter_map(|t| {
                     let (ok, cmp) = t.filter_cmp_key(ctx, query);
@@ -186,33 +178,22 @@ impl Command {
                 .take(20)
                 .collect(),
 
-            Command::Wiki => ph::documents(&ctx.config)?
+            Self::Wiki => ph::documents(&ctx.config)?
                 .into_iter()
                 .filter(|d| d.matches(query))
                 .sorted_by_key(|d| d.cmp_key(query))
                 .map(|d| d.into_item(ctx))
                 .take(20)
                 .collect(),
+
+            Self::Repos => ph::repos(&ctx.config)?
+                .into_iter()
+                .filter(|r| r.matches(query))
+                .map(|r| r.into_item())
+                .take(20)
+                .collect(),
         };
         Ok(items)
-    }
-}
-
-impl Repo {
-    fn matches(&self, query: &str) -> bool {
-        query
-            .split_whitespace()
-            .all(|q| self.name.to_lowercase().contains(q))
-    }
-
-    fn into_item(self) -> Item {
-        let mut item = Item::new(self.name)
-            .arg(self.uri)
-            .icon(Icon::with_image("repo.png"));
-        if let Some(desc) = self.description {
-            item = item.subtitle(desc);
-        };
-        item
     }
 }
 
@@ -355,6 +336,24 @@ impl Document {
             ))
             .subtitle(path)
             .icon(Icon::with_image("wiki.png"))
+    }
+}
+
+impl Repo {
+    fn matches(&self, query: &str) -> bool {
+        query
+            .split_whitespace()
+            .all(|q| self.name.to_lowercase().contains(q))
+    }
+
+    fn into_item(self) -> Item {
+        let mut item = Item::new(self.name)
+            .arg(self.uri)
+            .icon(Icon::with_image("repo.png"));
+        if let Some(desc) = self.description {
+            item = item.subtitle(desc);
+        };
+        item
     }
 }
 

@@ -24,75 +24,6 @@ static CACHE: LazyLock<cache::Cache> = LazyLock::new(|| {
 });
 
 #[derive(Debug, Clone)]
-pub struct User {
-    pub phid: String,
-    pub handle: String,
-    pub handle_lower: String,
-}
-
-/// Fetches all the users.
-pub fn users(config: &Config) -> Result<Vec<User>> {
-    let path = "/user.search";
-    let form = &[("order", "newest")];
-    let items = CACHE.query(
-        cache::Query::new("users")
-            .ttl(TTL_DAY)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch_all(config, path, form)),
-    )?;
-
-    let parse = |r| -> Result<User> {
-        let handle: String =
-            lookup(&r, "/fields/username").context("failed to extract `handle`")?;
-        Ok(User {
-            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
-            handle_lower: handle.to_lowercase(),
-            handle,
-        })
-    };
-
-    items
-        .into_iter()
-        .map(|r| parse(r).context("failed to parse user"))
-        .collect()
-}
-
-#[derive(Debug, Clone)]
-pub struct Repo {
-    pub name: String,
-    pub description: Option<String>,
-    pub uri: String,
-}
-
-/// Fetches the repositories.
-pub fn repos(config: &Config) -> Result<Vec<Repo>> {
-    let path = "/repository.query";
-    let form = &[("order", "committed")];
-    let result = CACHE.query(
-        cache::Query::new("repos")
-            .ttl(TTL_DAY)
-            .checksum(checksum(config, path, form))
-            .update_fn(|| fetch(config, path, form)),
-    )?;
-
-    let parse = |r| -> Result<Repo> {
-        Ok(Repo {
-            name: lookup(&r, "/name").context("failed to extract `name`")?,
-            description: lookup(&r, "/description").context("failed to extract `description`")?,
-            uri: lookup(&r, "/uri").context("failed to extract `uri`")?,
-        })
-    };
-
-    result
-        .as_array()
-        .context("expected array of repos")?
-        .to_owned()
-        .into_iter()
-        .map(|r| parse(r).context("failed to parse repo"))
-        .collect()
-}
-
-#[derive(Debug, Clone)]
 pub struct Diff {
     pub id: u32,
     pub title: String,
@@ -241,6 +172,75 @@ pub fn documents(config: &Config) -> Result<Vec<Document>> {
             typ == "WIKI" && status == "active"
         })
         .map(|r| parse(r).context("failed to parse document"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct Repo {
+    pub name: String,
+    pub description: Option<String>,
+    pub uri: String,
+}
+
+/// Fetches the repositories.
+pub fn repos(config: &Config) -> Result<Vec<Repo>> {
+    let path = "/repository.query";
+    let form = &[("order", "committed")];
+    let result = CACHE.query(
+        cache::Query::new("repos")
+            .ttl(TTL_DAY)
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<Repo> {
+        Ok(Repo {
+            name: lookup(&r, "/name").context("failed to extract `name`")?,
+            description: lookup(&r, "/description").context("failed to extract `description`")?,
+            uri: lookup(&r, "/uri").context("failed to extract `uri`")?,
+        })
+    };
+
+    result
+        .as_array()
+        .context("expected array of repos")?
+        .to_owned()
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse repo"))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct User {
+    pub phid: String,
+    pub handle: String,
+    pub handle_lower: String,
+}
+
+/// Fetches all the users.
+pub fn users(config: &Config) -> Result<Vec<User>> {
+    let path = "/user.search";
+    let form = &[("order", "newest")];
+    let items = CACHE.query(
+        cache::Query::new("users")
+            .ttl(TTL_DAY)
+            .checksum(checksum(config, path, form))
+            .update_fn(|| fetch_all(config, path, form)),
+    )?;
+
+    let parse = |r| -> Result<User> {
+        let handle: String =
+            lookup(&r, "/fields/username").context("failed to extract `handle`")?;
+        Ok(User {
+            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
+            handle_lower: handle.to_lowercase(),
+            handle,
+        })
+    };
+
+    items
+        .into_iter()
+        .map(|r| parse(r).context("failed to parse user"))
         .collect()
 }
 
