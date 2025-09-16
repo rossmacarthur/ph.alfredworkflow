@@ -1,6 +1,6 @@
 [package]
-name = "ph-alfredworkflow"
-version = "0.0.0"
+name = "ph-alfred-workflow"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.89.0"
 publish = false

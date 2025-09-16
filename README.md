@@ -52,3 +52,6 @@ This project is distributed under the terms of both the MIT license and the
 Apache License (Version 2.0).
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for details.
+
+This project uses icons from [Font Awesome](https://fontawesome.com), licensed
+under the [SIL OFL 1.1](https://openfontlicense.org/).

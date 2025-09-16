@@ -4,6 +4,8 @@
 <dict>
 	<key>bundleid</key>
 	<string>io.macarthur.ross.ph</string>
+	<key>category</key>
+	<string>Productivity</string>
 	<key>connections</key>
 	<dict>
 		<key>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</key>
@@ -87,7 +89,7 @@
 				<key>subtext</key>
 				<string></string>
 				<key>title</key>
-				<string>Search</string>
+				<string>Search Phabricator...</string>
 				<key>type</key>
 				<integer>8</integer>
 				<key>withspace</key>
@@ -120,5 +122,9 @@
 	</dict>
 	<key>userconfigurationconfig</key>
 	<array/>
+	<key>version</key>
+	<string>0.1.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/rossmacarthur/ph.alfredworkflow</string>
 </dict>
 </plist>
