@@ -85,7 +85,7 @@
 				<key>scriptargtype</key>
 				<integer>0</integer>
 				<key>scriptfile</key>
-				<string>ph-alfredworkflow</string>
+				<string>ph-alfred-workflow</string>
 				<key>subtext</key>
 				<string></string>
 				<key>title</key>
