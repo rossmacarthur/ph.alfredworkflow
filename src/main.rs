@@ -1,31 +1,30 @@
 mod config;
 mod human;
-mod ord_float;
+mod meili;
 mod ph;
+mod types;
 
-use std::cmp::Reverse;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
 use std::io;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use anyhow::Result;
 use constcat::concat;
-use itermore::IterSorted as _;
 use powerpack::Icon;
 use powerpack::Item;
 use powerpack::cache;
 use powerpack::logger;
-use then::Some as _;
 
 use crate::config::Config;
-use crate::ord_float::OrdFloat;
-use crate::ph::Diff;
-use crate::ph::Document;
-use crate::ph::Repo;
-use crate::ph::Task;
-use crate::ph::User;
+use crate::types::Diff;
+use crate::types::Page;
+use crate::types::Repo;
+use crate::types::Task;
+use crate::types::User;
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -41,8 +40,9 @@ struct Context {
 enum Command {
     Diffs,
     Tasks,
-    Wiki,
+    Pages,
     Repos,
+    Search,
 }
 
 fn main() -> Result<()> {
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
         eprintln!("ERROR: {err:#}");
         let item = if let Some(cache::QueryError::Miss) = err.downcast_ref::<cache::QueryError>() {
             Item::new(format!("Warning: {err}"))
-                .subtitle("The workflow is still loading data from Phabricator/Phorge")
+                .subtitle("The workflow is still loading data from Phabricator")
                 .icon(Icon::with_image("./assets/warning.png"))
         } else {
             Item::new(format!("Error: {err}"))
@@ -69,7 +69,7 @@ fn run() -> Result<()> {
     let config = Config::load()?;
     let users = ph::users(&config)?
         .into_iter()
-        .map(|u| (u.phid.clone(), u))
+        .map(|u| (u.id.clone(), u))
         .collect();
     let ctx = Context {
         config,
@@ -119,29 +119,34 @@ fn run() -> Result<()> {
     output(items)
 }
 
-trait CmpKey: Ord + Clone + Copy + Sized {}
-impl<T> CmpKey for T where T: Ord + Clone + Copy + Sized {}
-
 impl Command {
-    fn all() -> [Self; 4] {
-        [Self::Diffs, Self::Tasks, Self::Wiki, Self::Repos]
+    fn all() -> [Self; 5] {
+        [
+            Self::Diffs,
+            Self::Tasks,
+            Self::Pages,
+            Self::Repos,
+            Self::Search,
+        ]
     }
 
     fn name(&self) -> &'static str {
         match self {
             Self::Diffs => "diffs",
             Self::Tasks => "tasks",
-            Self::Wiki => "wiki",
+            Self::Pages => "wiki",
             Self::Repos => "repos",
+            Self::Search => "search",
         }
     }
 
     fn subtitle(&self) -> &'static str {
         match self {
-            Self::Diffs => "Search active revisions",
+            Self::Diffs => "Search differential revisions",
             Self::Tasks => "Search maniphest tasks",
-            Self::Wiki => "Search wiki pages",
+            Self::Pages => "Search phriction pages",
             Self::Repos => "Search repositories",
+            Self::Search => "Search all available content",
         }
     }
 
@@ -149,8 +154,9 @@ impl Command {
         match self {
             Self::Diffs => "./assets/diff.png",
             Self::Tasks => "./assets/task.png",
-            Self::Wiki => "./assets/wiki.png",
+            Self::Pages => "./assets/wiki.png",
             Self::Repos => "./assets/repo.png",
+            Self::Search => "./assets/search.png",
         }
     }
 
@@ -163,36 +169,26 @@ impl Command {
     }
 
     fn exec(&self, ctx: &Context, query: &str) -> Result<Vec<Item>> {
-        let items = match self {
-            Self::Diffs => ph::diffs(&ctx.config)?
-                .into_iter()
-                .filter_map(|d| {
-                    let (ok, cmp) = d.filter_cmp_key(ctx, query);
-                    ok.some((d, cmp))
-                })
-                .sorted_by_key(|&(_, cmp)| cmp)
-                .map(|(d, _)| d.into_item(ctx))
-                .take(20)
-                .collect(),
-
-            Self::Tasks => ph::tasks(&ctx.config)?
-                .into_iter()
-                .filter_map(|t| {
-                    let (ok, cmp) = t.filter_cmp_key(ctx, query);
-                    ok.some((t, cmp))
-                })
-                .sorted_by_key(|&(_, cmp)| cmp)
-                .map(|(t, _)| t.into_item(ctx))
-                .take(20)
-                .collect(),
-
-            Self::Wiki => ph::documents(&ctx.config)?
-                .into_iter()
-                .filter(|d| d.matches(query))
-                .sorted_by_key(|d| d.cmp_key(query))
-                .map(|d| d.into_item(ctx))
-                .take(20)
-                .collect(),
+        ph::reindex(&ctx.config);
+        let items: Vec<_> = match self {
+            Self::Diffs | Self::Tasks | Self::Pages => {
+                let index = match self {
+                    Self::Diffs => meili::Index::Diffs,
+                    Self::Tasks => meili::Index::Tasks,
+                    Self::Pages => meili::Index::Pages,
+                    _ => unreachable!(),
+                };
+                let (text, filter) = match build_query_filter(ctx, index, query) {
+                    Some(f) => f,
+                    None => return Ok(vec![]),
+                };
+                meili::Client::new(&ctx.config)
+                    .search_one(index, &text, filter.as_deref(), 20)
+                    .context("meilisearch search failed")?
+                    .into_iter()
+                    .map(|h| h.into_item(ctx))
+                    .collect()
+            }
 
             Self::Repos => ph::repos(&ctx.config)?
                 .into_iter()
@@ -200,148 +196,202 @@ impl Command {
                 .map(|r| r.into_item())
                 .take(20)
                 .collect(),
+
+            Self::Search => meili::Client::new(&ctx.config)
+                .search_all(query, 20)?
+                .into_iter()
+                .map(|h| h.into_item(ctx))
+                .collect(),
         };
         Ok(items)
     }
 }
 
-impl Diff {
-    fn filter_cmp_key(&self, ctx: &Context, query: &str) -> (bool, impl CmpKey + use<>) {
-        let (handles, rest): (Vec<_>, Vec<_>) =
-            query.split_whitespace().partition(|q| q.starts_with('@'));
+fn build_query_filter(
+    ctx: &Context,
+    index: meili::Index,
+    query: &str,
+) -> Option<(String, Option<String>)> {
+    let (handles, statuses, not_statuses, text) = parse_query(query);
 
-        let filter_owner = handles.into_iter().all(|h| {
-            h.strip_prefix('@')
-                .map(|u| {
-                    ctx.users
-                        .get(&self.author_phid)
-                        .is_some_and(|user| user.matches(u))
-                })
-                .unwrap_or(false)
-        });
+    let mut conditions = Vec::new();
 
-        let filter =
-            query.is_empty() || (filter_owner && rest.iter().all(|q| self.title_lower.contains(q)));
-
-        let query = rest.join(" ");
-
-        let cmp = (
-            Reverse(filter_owner),
-            Reverse(self.title_lower.starts_with(&query)),
-            Reverse(self.title_lower.contains(&query)),
-            Reverse(self.updated),
-        );
-
-        (filter, cmp)
+    if let Some(user_field) = index.user_field()
+        && !handles.is_empty()
+    {
+        let matching = ctx.handles_matching(&handles);
+        if matching.is_empty() {
+            return None;
+        }
+        if let Some(cond) = filter_contains(user_field, &matching, false) {
+            conditions.push(cond);
+        }
     }
 
+    if let Some(status_field) = index.status_field()
+        && !statuses.is_empty()
+    {
+        let matching = index.statuses_matching(&statuses);
+        if matching.is_empty() {
+            return None;
+        }
+        if let Some(cond) = filter_contains(status_field, &matching, false) {
+            conditions.push(cond);
+        }
+    }
+
+    if let Some(status_field) = index.status_field()
+        && !not_statuses.is_empty()
+    {
+        let matching = index.statuses_matching(&not_statuses);
+        if let Some(cond) = filter_contains(status_field, &matching, true) {
+            conditions.push(cond);
+        }
+    }
+
+    let filter = conditions.join(" AND ");
+
+    Some((text, Some(filter)))
+}
+
+fn parse_query(query: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>, String) {
+    let mut handles = Vec::new();
+    let mut statuses = Vec::new();
+    let mut not_statuses = Vec::new();
+    let mut parts = Vec::new();
+    for part in query.split_whitespace() {
+        if let Some(handle) = part.strip_prefix('@')
+            && !handle.is_empty()
+        {
+            handles.push(handle);
+        } else if let Some(status) = part.strip_prefix("+")
+            && !status.is_empty()
+        {
+            statuses.push(status);
+        } else if let Some(status) = part.strip_prefix("-")
+            && !status.is_empty()
+        {
+            not_statuses.push(status);
+        } else {
+            parts.push(part);
+        }
+    }
+    (handles, statuses, not_statuses, parts.join(" "))
+}
+
+fn filter_contains(field: &str, values: &[&str], not: bool) -> Option<String> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut f = if not {
+        format!("{field} NOT IN [")
+    } else {
+        format!("{field} IN [")
+    };
+    for v in values {
+        write!(&mut f, "\"{v}\",").expect("fmt write to string never fails");
+    }
+    f.push(']');
+    Some(f)
+}
+
+impl Context {
+    fn handles_matching(&self, prefixes: &[&str]) -> Vec<&str> {
+        self.users
+            .iter()
+            .filter(|(_, user)| prefixes.iter().any(|h| user.handle_lower.starts_with(*h)))
+            .map(|(id, _)| id.as_str())
+            .collect()
+    }
+}
+
+impl meili::Index {
+    fn user_field(&self) -> Option<&'static str> {
+        match self {
+            Self::Diffs => Some("author_id"),
+            Self::Tasks => Some("owner_id"),
+            Self::Pages => None,
+        }
+    }
+
+    fn status_field(&self) -> Option<&'static str> {
+        match self {
+            Self::Diffs => Some("status"),
+            Self::Tasks => Some("status"),
+            Self::Pages => None,
+        }
+    }
+
+    fn statuses(&self) -> &'static [&'static str] {
+        match self {
+            Self::Diffs => Diff::statuses(),
+            Self::Tasks => Task::statuses(),
+            Self::Pages => Page::statuses(),
+        }
+    }
+
+    fn statuses_matching(&self, prefixes: &[&str]) -> Vec<&'static str> {
+        self.statuses()
+            .iter()
+            .filter(|s| prefixes.iter().any(|p| s.starts_with(p)))
+            .copied()
+            .collect()
+    }
+}
+
+impl meili::Hit {
     fn into_item(self, ctx: &Context) -> Item {
-        let ago = human::format_ago((ctx.now - self.updated).try_into().unwrap());
+        match self {
+            Self::Diff(hit) => hit.into_item(ctx),
+            Self::Task(hit) => hit.into_item(ctx),
+            Self::Page(hit) => hit.into_item(ctx),
+        }
+    }
+}
+
+impl Diff {
+    fn into_item(self, ctx: &Context) -> Item {
+        let ago = ago(ctx, self.updated_at);
         let author = ctx
             .users
-            .get(&self.author_phid)
+            .get(&self.author_id)
             .map(|u| u.handle.as_str())
             .unwrap_or("unknown");
         let status = anycase::as_lower(self.status);
         let subtitle = format!("{ago} by {author}, {status}");
         Item::new(format!("D{}: {}", self.id, self.title))
             .subtitle(subtitle)
-            .arg(self.uri)
+            .arg(format!("{}/D{}", ctx.config.ph_base_url, self.id))
             .icon(Icon::with_image("./assets/diff.png"))
     }
 }
 
 impl Task {
-    fn filter_cmp_key(&self, ctx: &Context, query: &str) -> (bool, impl CmpKey + use<>) {
-        let (handles, rest): (Vec<_>, Vec<_>) =
-            query.split_whitespace().partition(|q| q.starts_with('@'));
-
-        let filter_owner = handles.into_iter().all(|h| {
-            h.strip_prefix('@')
-                .map(|u| {
-                    self.owner_phid
-                        .as_ref()
-                        .and_then(|phid| ctx.users.get(phid))
-                        .is_some_and(|user| user.matches(u))
-                })
-                .unwrap_or(false)
-        });
-
-        let filter = query.is_empty()
-            || (filter_owner
-                && rest
-                    .iter()
-                    .all(|q| self.title_lower.contains(q) || self.description_lower.contains(q)));
-
-        let query = rest.join(" ");
-
-        let cmp = (
-            Reverse(filter_owner),
-            Reverse(self.title_lower.starts_with(&query)),
-            Reverse(self.title_lower.contains(&query)),
-            Reverse(self.description_lower.contains(&query)),
-            Reverse(OrdFloat({
-                let score = strsim::jaro_winkler(&self.title_lower, &query);
-                (score * 10.0).round() / 10.0
-            })),
-            Reverse(self.updated),
-        );
-
-        (filter, cmp)
-    }
-
     fn into_item(self, ctx: &Context) -> Item {
-        let ago = human::format_ago((ctx.now - self.updated).try_into().unwrap());
-        let mut subtitle = format!("updated {ago}");
+        let ago = ago(ctx, self.updated_at);
+        let status = anycase::as_lower(self.status);
+        let mut subtitle = format!("updated {ago}, {status}");
         if let Some(owner) = self
-            .owner_phid
+            .owner_id
             .as_ref()
-            .and_then(|phid| ctx.users.get(phid))
+            .and_then(|id| ctx.users.get(id))
             .map(|user| user.handle.as_str())
         {
             write!(&mut subtitle, ", assigned to {owner}")
                 .expect("fmt write to string never fails");
         }
         Item::new(format!("T{}: {}", self.id, self.title))
-            .arg(self.uri)
+            .arg(format!("{}/T{}", ctx.config.ph_base_url, self.id))
             .subtitle(subtitle)
             .icon(Icon::with_image("./assets/task.png"))
     }
 }
 
-impl Document {
-    fn matches(&self, query: &str) -> bool {
-        query.is_empty()
-            || query.split_whitespace().any(|q| {
-                self.path_lower.contains(q)
-                    || self.title_lower.contains(q)
-                    || self.content_lower.contains(q)
-            })
-    }
-
-    fn cmp_key(&self, query: &str) -> impl CmpKey + use<> {
-        (
-            Reverse(self.path_lower.starts_with(query)),
-            Reverse(self.title_lower.starts_with(query)),
-            Reverse(self.path_lower.contains(query)),
-            Reverse(self.title_lower.contains(query)),
-            Reverse(self.content_lower.contains(query)),
-            Reverse(OrdFloat({
-                let score = strsim::jaro_winkler(&self.title_lower, query);
-                (score * 10.0).round() / 10.0
-            })),
-            Reverse(self.id),
-        )
-    }
-
+impl Page {
     fn into_item(self, ctx: &Context) -> Item {
         let path = format!("/w/{}", self.path.trim_start_matches('/'));
         Item::new(self.title)
-            .arg(format!(
-                "{}{}",
-                ctx.config.api_url.trim_end_matches("/api/"),
-                path,
-            ))
+            .arg(format!("{}{}", ctx.config.ph_base_url, path))
             .subtitle(path)
             .icon(Icon::with_image("./assets/wiki.png"))
     }
@@ -365,10 +415,11 @@ impl Repo {
     }
 }
 
-impl User {
-    fn matches(&self, query: &str) -> bool {
-        self.handle_lower.starts_with(query)
-    }
+fn ago(ctx: &Context, updated_at: i64) -> Cow<'static, str> {
+    jiff::Timestamp::from_second(updated_at)
+        .ok()
+        .map(|t| human::format_ago((ctx.now - t).try_into().unwrap()))
+        .unwrap_or_default()
 }
 
 fn output(items: impl IntoIterator<Item = Item>) -> Result<()> {

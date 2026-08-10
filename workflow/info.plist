@@ -103,6 +103,8 @@
 			<integer>3</integer>
 		</dict>
 	</array>
+	<key>readme</key>
+	<string></string>
 	<key>uidata</key>
 	<dict>
 		<key>1B1C25E3-F561-4A7A-8705-67D742DDE3E0</key>
@@ -122,6 +124,13 @@
 	</dict>
 	<key>userconfigurationconfig</key>
 	<array/>
+	<key>variables</key>
+	<dict>
+		<key>MEILI_KEY</key>
+		<string>your master key</string>
+		<key>MEILI_URL</key>
+		<string>http://localhost:7700</string>
+	</dict>
 	<key>version</key>
 	<string>0.1.1</string>
 	<key>webaddress</key>

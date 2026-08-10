@@ -454,12 +454,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itermore"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac87f762608cc2efb6f8f45e419c5047daa2e781a7b57b2ed1b30abf55549e06"
-
-[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -647,7 +641,6 @@ dependencies = [
  "anyhow",
  "constcat",
  "home",
- "itermore",
  "jiff",
  "log",
  "powerpack",
@@ -655,7 +648,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "strsim",
- "then",
  "ureq",
 ]
 
@@ -697,11 +689,12 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "powerpack"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a0ff9d015b06819f9bfda60ea6e6eb790f205dc4f91a5bf771435d7c4e31f64"
+checksum = "3d311d7cbf51c1c3caa98f293da99848de7bab62387701bf7ac8919e78c03252"
 dependencies = [
  "powerpack-cache",
+ "powerpack-detach",
  "powerpack-env",
  "powerpack-logger",
  "serde",
@@ -710,9 +703,9 @@ dependencies = [
 
 [[package]]
 name = "powerpack-cache"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19567b28026dc8704d3fd84747c66443b9480476ddb907b79a85fac2adad95e2"
+checksum = "71205914ab6d1bd400cbf33f6490ecf46422971cfa7517120f4b0ce1bb2f44b7"
 dependencies = [
  "flagset",
  "home",
@@ -726,9 +719,9 @@ dependencies = [
 
 [[package]]
 name = "powerpack-detach"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73d3dec525d295359a204aa6d589845aa297a908f6dd6baf50b27552bd71addf"
+checksum = "9c86e105c70f34e544516315d09caad99f69e27df55c4ad46dfbb033380681ed"
 dependencies = [
  "libc",
  "log",
@@ -736,18 +729,18 @@ dependencies = [
 
 [[package]]
 name = "powerpack-env"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d42a064b456edfdf862d47d6b06227a2bf617045a11f86f549e629ff908637"
+checksum = "b5ccb2282f209c63c5cebd7f144070572a4ebc78cc705b5133e3352f0fc2c9ca"
 dependencies = [
  "home",
 ]
 
 [[package]]
 name = "powerpack-logger"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b7dd2e7289b2fd19d91b735775005002cb9048098cffb31582eefdbb2c6fd51"
+checksum = "6dd10fbb044040175742b267a9fbb58f76848105e2dcdbdd306a9d8c15cfa03c"
 dependencies = [
  "home",
  "jiff",
@@ -996,12 +989,6 @@ dependencies = [
  "rustix",
  "windows-sys 0.59.0",
 ]
-
-[[package]]
-name = "then"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ed51d496b818a158761fb6b75e24df2380588996e609afe3fd3993577ff628"
 
 [[package]]
 name = "thiserror"

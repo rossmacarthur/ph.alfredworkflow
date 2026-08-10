@@ -10,15 +10,13 @@ anycase = "0.1.0"
 anyhow = "1.0.99"
 constcat = "0.6.1"
 home = "0.5.11"
-itermore = { version = "0.8.0", features = ["std", "sorted"] }
 jiff = "0.2.15"
 log = { version = "0.4.28", features = ["std"] }
-powerpack = { version = "0.7.0", features = ["cache", "logger"] }
+powerpack = { version = "0.8.0", features = ["cache", "detach", "logger"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
 sha1 = "0.10.6"
 strsim = "0.11.1"
-then = "0.1.0"
 ureq = { version = "3.1.0", features = ["native-tls", "json"] }
 
 [lints.rust]

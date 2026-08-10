@@ -17,6 +17,36 @@ documents.
   - Full text search of document titles and content
 - Blazingly fast 🤸.
 
+## Usage
+
+The workflow provides commands for searching `diffs`, `tasks`, `wiki`, `repo`,
+and a general `search` that searches across `diffs`, `tasks` and the `wiki`.
+
+The search query you provide can also contain the following filters.
+
+### Filtering by user
+
+You can filter diffs and tasks by user with the `@` prefix:
+
+- `diffs @username` - Show diffs authored by username
+- `tasks @username` - Show tasks owned by username
+
+### Filtering by status
+
+You can filter diffs aed tasks by status using the `+` prefix:
+
+**Diffs:**
+
+For example:
+- `diffs +needs-review` - Show only diffs that need review
+- `diffs +accepted` - Show only accepted diffs
+
+**Tasks:**
+
+For example:
+- `tasks +open` - Show only open tasks
+- `tasks +resolved` - Show only resolved tasks
+
 ## 📦 Installation
 
 ### Pre-packaged

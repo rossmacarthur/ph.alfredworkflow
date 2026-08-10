@@ -1,17 +1,25 @@
 use std::iter;
 use std::sync::LazyLock;
 use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Context as _;
 use anyhow::Result;
 use anyhow::bail;
 use constcat::concat;
 use powerpack::cache;
+use powerpack::detach;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json as json;
 
 use crate::config::Config;
+use crate::meili;
+use crate::types::Diff;
+use crate::types::Page;
+use crate::types::Repo;
+use crate::types::Task;
+use crate::types::User;
 
 const USER_AGENT: &str = concat!(crate::PKG_NAME, "/", crate::PKG_VERSION);
 
@@ -26,172 +34,165 @@ static CACHE: LazyLock<cache::Cache> = LazyLock::new(|| {
         .build()
 });
 
-#[derive(Debug, Clone)]
-pub struct Diff {
-    pub id: u32,
-    pub title: String,
-    pub title_lower: String,
-    pub uri: String,
-    pub status: String,
-    pub author_phid: String,
-    pub updated: jiff::Timestamp,
+/// Spawns three background tasks to re-index diffs, tasks and wiki pages.
+pub fn reindex(config: &Config) {
+    if let Err(e) = diffs(config) {
+        log::warn!("reindex diffs: {}", format_err(e));
+    }
+    if let Err(e) = tasks(config) {
+        log::warn!("reindex tasks: {}", format_err(e));
+    }
+    if let Err(e) = pages(config) {
+        log::warn!("reindex pages: {}", format_err(e));
+    }
 }
 
-/// Fetches the open diffs
-pub fn diffs(config: &Config) -> Result<Vec<Diff>> {
+/// Fetches all diffs and reindexes them
+fn diffs(config: &Config) -> Result<()> {
     let path = "/differential.revision.search";
-    let form = &[
-        ("constraints[statuses][]", "needs-review"),
-        ("constraints[statuses][]", "needs-revision"),
-        ("constraints[statuses][]", "changes-planned"),
-        ("constraints[statuses][]", "accepted"),
-        ("order", "updated"),
-    ];
-    let items = CACHE
+    CACHE
         .query(
             cache::Query::new("diffs")
                 .ttl(TTL_MINUTE)
-                .checksum(checksum(config, path, form))
-                .update_fn(|| fetch_all(config, path, form)),
+                .checksum(checksum(config, path, &[]))
+                .update_fn(move |prev| -> Result<()> {
+                    let mut form = vec![("order", "updated".to_owned())];
+                    if let Some(cache::PrevEntry {
+                        entry: Ok(entry), ..
+                    }) = prev
+                    {
+                        let start = entry
+                            .pre_update_time
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64
+                            - 600;
+                        form.push(("constraints[modifiedStart]", start.to_string()));
+                    };
+
+                    let items = fetch_all(config, path, form)?;
+                    let diffs: Vec<_> = items
+                        .into_iter()
+                        .map(|r| Diff::parse(r).context("failed to parse diff"))
+                        .collect::<Result<_>>()?;
+                    meili::index_diffs(config, &diffs)?;
+                    Ok(())
+                }),
         )
         .context("failed to fetch diffs from cache")?;
+    Ok(())
+}
 
-    let parse = |r| -> Result<Diff> {
-        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
-        let title: String = lookup(&r, "/fields/title").context("failed to extract `title`")?;
-        Ok(Diff {
-            id,
-            title_lower: title.to_lowercase(),
-            title,
-            uri: lookup(&r, "/fields/uri").context("failed to extract `uri`")?,
+impl Diff {
+    fn parse(r: json::Value) -> Result<Self> {
+        Ok(Self {
+            id: lookup(&r, "/id").context("failed to extract `id`")?,
+            title: lookup(&r, "/fields/title").context("failed to extract `title`")?,
             status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
-            author_phid: lookup(&r, "/fields/authorPHID")
+            author_id: lookup(&r, "/fields/authorPHID")
                 .context("failed to extract `authorPHID`")?,
-            updated: jiff::Timestamp::from_second(
-                lookup(&r, "/fields/dateModified").context("failed to extract `dateModified`")?,
-            )?,
+            updated_at: lookup(&r, "/fields/dateModified")
+                .context("failed to extract `dateModified`")?,
         })
-    };
-
-    items
-        .into_iter()
-        .map(|r| parse(r).context("failed to parse diff"))
-        .collect()
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct Task {
-    pub id: u32,
-    pub title: String,
-    pub title_lower: String,
-    pub uri: String,
-    pub owner_phid: Option<String>,
-    pub description_lower: String,
-    pub updated: jiff::Timestamp,
-}
-
-/// Fetches the open tasks
-pub fn tasks(config: &Config) -> Result<Vec<Task>> {
+/// Fetches all tasks and reindexes them
+pub fn tasks(config: &Config) -> Result<()> {
     let path = "/maniphest.search";
-    let form = &[("constraints[statuses][]", "open"), ("order", "updated")];
-
-    let result = CACHE
+    CACHE
         .query(
             cache::Query::new("tasks")
-                .ttl(TTL_HOUR)
-                .checksum(checksum(config, path, form))
-                .update_fn(|| fetch_all(config, path, form)),
+                .ttl(TTL_MINUTE)
+                .checksum(checksum(config, path, &[]))
+                .update_fn(|prev| -> Result<()> {
+                    let mut form = vec![("order", "updated".to_owned())];
+                    if let Some(cache::PrevEntry {
+                        entry: Ok(entry), ..
+                    }) = prev
+                    {
+                        let start = entry
+                            .pre_update_time
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64
+                            - 600;
+                        form.push(("constraints[modifiedStart]", start.to_string()));
+                    };
+
+                    let items = fetch_all(config, path, form)?;
+                    let tasks: Vec<_> = items
+                        .into_iter()
+                        .map(|r| Task::parse(r).context("failed to parse task"))
+                        .collect::<Result<_>>()?;
+                    meili::index_tasks(config, &tasks)?;
+                    Ok(())
+                }),
         )
         .context("failed to fetch tasks from cache")?;
+    Ok(())
+}
 
-    let parse = |r| -> Result<Task> {
-        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
-        let title: String = lookup(&r, "/fields/name").context("failed to extract `name`")?;
-        let uri = format!("{}/T{}", config.api_url.trim_end_matches("/api/"), id);
-        let owner_phid: Option<String> =
-            lookup(&r, "/fields/ownerPHID").context("failed to extract `ownerPHID`")?;
-        let updated = jiff::Timestamp::from_second(
-            lookup(&r, "/fields/dateModified").context("failed to extract `dateModified`")?,
-        )?;
-        let description: String =
-            lookup(&r, "/fields/description/raw").context("failed to extract `description`")?;
-        Ok(Task {
-            id,
-            title_lower: title.to_lowercase(),
-            title,
-            uri,
-            owner_phid,
-            description_lower: description.to_lowercase(),
-            updated,
+impl Task {
+    fn parse(r: json::Value) -> Result<Self> {
+        Ok(Self {
+            id: lookup(&r, "/id").context("failed to extract `id`")?,
+            title: lookup(&r, "/fields/name").context("failed to extract `name`")?,
+            owner_id: lookup(&r, "/fields/ownerPHID").context("failed to extract `ownerPHID`")?,
+            description: lookup(&r, "/fields/description/raw")
+                .context("failed to extract `description`")?,
+            status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
+            updated_at: lookup(&r, "/fields/dateModified")
+                .context("failed to extract `dateModified`")?,
         })
-    };
-
-    result
-        .into_iter()
-        .map(|r| parse(r).context("failed to parse task"))
-        .collect()
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct Document {
-    pub id: u32,
-    pub path: String,
-    pub path_lower: String,
-    pub title: String,
-    pub title_lower: String,
-    pub content_lower: String,
-}
-
-/// Fetches wiki documents
-pub fn documents(config: &Config) -> Result<Vec<Document>> {
+/// Fetches wiki pages
+pub fn pages(config: &Config) -> Result<()> {
     let path = "/phriction.document.search";
-    let form = &[("order", "newest"), ("attachments[content]", "true")];
-    let items = CACHE
+    let form = [("order", "newest"), ("attachments[content]", "true")];
+    CACHE
         .query(
-            cache::Query::new("documents")
-                .ttl(TTL_DAY)
-                .checksum(checksum(config, path, form))
-                .update_fn(|| fetch_all(config, path, form)),
+            cache::Query::new("pages")
+                .ttl(TTL_HOUR)
+                .checksum(checksum(config, path, &[]))
+                .update_fn(|_| -> Result<()> {
+                    let items = fetch_all(config, path, form)?;
+                    let pages: Vec<_> = items
+                        .into_iter()
+                        .filter_map(|r| {
+                            Page::parse(r)
+                                .transpose()
+                                .map(|r| r.context("failed to parse page"))
+                        })
+                        .collect::<Result<_>>()?;
+                    meili::index_pages(config, &pages)?;
+                    Ok(())
+                }),
         )
-        .context("failed to fetch documents from cache")?;
-
-    let parse = |r| -> Result<Document> {
-        let id: u32 = lookup(&r, "/id").context("failed to extract `id`")?;
-        let path: String =
-            lookup(&r, "/attachments/content/path").context("failed to extract `path`")?;
-        let title: String =
-            lookup(&r, "/attachments/content/title").context("failed to extract `title`")?;
-        let content: String = lookup(&r, "/attachments/content/content/raw")
-            .context("failed to extract `content`")?;
-        Ok(Document {
-            id,
-            path_lower: path.to_lowercase(),
-            path,
-            title_lower: title.to_lowercase(),
-            title,
-            content_lower: content.to_lowercase(),
-        })
-    };
-
-    items
-        .into_iter()
-        .filter(|r| {
-            let typ: String = lookup(r, "/type").unwrap_or_default();
-            let status: String = lookup(r, "/fields/status/value").unwrap_or_default();
-            typ == "WIKI" && status == "active"
-        })
-        .map(|r| parse(r).context("failed to parse document"))
-        .collect()
+        .context("failed to fetch pages from cache")?;
+    Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct Repo {
-    pub name: String,
-    pub description: Option<String>,
-    pub uri: String,
+impl Page {
+    fn parse(r: json::Value) -> Result<Option<Self>> {
+        let typ: String = lookup(&r, "/type").unwrap_or_default();
+        if typ != "WIKI" {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            id: lookup(&r, "/id").context("failed to extract `id`")?,
+            path: lookup(&r, "/attachments/content/path").context("failed to extract `path`")?,
+            status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
+            title: lookup(&r, "/attachments/content/title").context("failed to extract `title`")?,
+            content: lookup(&r, "/attachments/content/content/raw")
+                .context("failed to extract `content`")?,
+        }))
+    }
 }
 
-/// Fetches the repositories.
+/// Fetches the repositories
 pub fn repos(config: &Config) -> Result<Vec<Repo>> {
     let path = "/repository.query";
     let form = &[("order", "committed")];
@@ -200,7 +201,7 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
             cache::Query::new("repos")
                 .ttl(TTL_DAY)
                 .checksum(checksum(config, path, form))
-                .update_fn(|| fetch(config, path, form)),
+                .update_fn(|_| fetch(config, path, form)),
         )
         .context("failed to fetch repos from cache")?;
 
@@ -221,23 +222,16 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
         .collect()
 }
 
-#[derive(Debug, Clone)]
-pub struct User {
-    pub phid: String,
-    pub handle: String,
-    pub handle_lower: String,
-}
-
-/// Fetches all the users.
+/// Fetches all the users
 pub fn users(config: &Config) -> Result<Vec<User>> {
     let path = "/user.search";
-    let form = &[("order", "newest")];
+    let form = [("order", "newest")];
     let items = CACHE
         .query(
             cache::Query::new("users")
                 .ttl(TTL_DAY)
-                .checksum(checksum(config, path, form))
-                .update_fn(|| fetch_all(config, path, form)),
+                .checksum(checksum(config, path, &form))
+                .update_fn(move |_| fetch_all(config, path, form)),
         )
         .context("failed to fetch users from cache")?;
 
@@ -245,7 +239,7 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
         let handle: String =
             lookup(&r, "/fields/username").context("failed to extract `handle`")?;
         Ok(User {
-            phid: lookup(&r, "/phid").context("failed to extract `phid`")?,
+            id: lookup(&r, "/phid").context("failed to extract `phid`")?,
             handle_lower: handle.to_lowercase(),
             handle,
         })
@@ -260,8 +254,8 @@ pub fn users(config: &Config) -> Result<Vec<User>> {
 fn checksum(config: &Config, path: &str, form: &[(&str, &str)]) -> [u8; 20] {
     use sha1::*;
     let mut hasher = Sha1::new();
-    hasher.update(&config.api_token);
-    hasher.update(&config.api_url);
+    hasher.update(&config.ph_api_token);
+    hasher.update(&config.ph_api_url);
     hasher.update(path);
     for (k, v) in form {
         hasher.update(k);
@@ -280,7 +274,11 @@ static AGENT_CONFIG: LazyLock<ureq::config::Config> = LazyLock::new(|| {
         .build()
 });
 
-fn fetch_all(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<Vec<json::Value>> {
+fn fetch_all<I, V>(config: &Config, path: &str, form: I) -> Result<Vec<json::Value>>
+where
+    I: IntoIterator<Item = (&'static str, V)>,
+    V: AsRef<str>,
+{
     #[derive(Debug, Clone, Deserialize)]
     #[allow(dead_code)] // fields are used to assert deserialization
     struct Cursor {
@@ -291,17 +289,22 @@ fn fetch_all(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<Vec<j
     }
 
     let agent = AGENT_CONFIG.new_agent();
-    let url = format!("{}{}", config.api_url, path);
+    let url = format!("{}{}", config.ph_api_url, path);
+
+    let form: Vec<_> = form
+        .into_iter()
+        .map(|(k, v)| (k, v.as_ref().to_owned()))
+        .collect();
 
     let mut items = Vec::new();
     let mut after_id: Option<String> = None;
 
     loop {
         let form = {
-            let mut f = form.to_vec();
-            f.push(("api.token", config.api_token.as_str()));
-            if let Some(ref after_id) = after_id {
-                f.push(("after", after_id.as_str()));
+            let mut f = form.clone();
+            f.push(("api.token", config.ph_api_token.clone()));
+            if let Some(after_id) = after_id.take() {
+                f.push(("after", after_id));
             }
             f
         };
@@ -318,10 +321,10 @@ fn fetch_all(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<Vec<j
         let data: json::Value = resp.body_mut().read_json()?;
         check_error(&data)?;
 
-        items.extend(
-            lookup::<Vec<json::Value>>(&data, "/result/data")
-                .context("failed to extract `data`")?,
-        );
+        let new_items = lookup::<Vec<json::Value>>(&data, "/result/data")
+            .context("failed to extract `data`")?;
+        log::info!("ph: fetched {} ({} new items)", url, new_items.len());
+        items.extend(new_items);
 
         let cursor =
             lookup::<Cursor>(&data, "/result/cursor").context("failed to extract `cursor`")?;
@@ -334,9 +337,9 @@ fn fetch_all(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<Vec<j
 
 fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Value> {
     let agent = AGENT_CONFIG.new_agent();
-    let url = format!("{}{}", config.api_url, path);
+    let url = format!("{}{}", config.ph_api_url, path);
 
-    let form = iter::once(("api.token", config.api_token.as_str())).chain(form.iter().copied());
+    let form = iter::once(("api.token", config.ph_api_token.as_str())).chain(form.iter().copied());
 
     let mut resp = agent
         .post(&url)
@@ -349,6 +352,7 @@ fn fetch(config: &Config, path: &str, form: &[(&str, &str)]) -> Result<json::Val
 
     let data: json::Value = resp.body_mut().read_json()?;
     check_error(&data)?;
+    log::info!("ph: fetched {url}");
 
     lookup::<json::Value>(&data, "/result").context("failed to extract `result`")
 }
@@ -358,7 +362,7 @@ fn check_error(data: &json::Value) -> Result<()> {
         && !err_code.is_null()
     {
         let err_info: String = lookup(data, "/error_info").unwrap_or_default();
-        bail!("Error code {}: {}", err_code, err_info);
+        bail!("error code {}: {}", err_code, err_info);
     }
     Ok(())
 }
@@ -371,4 +375,8 @@ where
         .pointer(ptr)
         .with_context(|| format!("failed to lookup `{ptr}` in `{value:?}`"))?;
     Ok(json::from_value(v.clone())?)
+}
+
+fn format_err(err: anyhow::Error) -> String {
+    detach::format_err(&*err.into_boxed_dyn_error())
 }

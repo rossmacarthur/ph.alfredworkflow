@@ -3,13 +3,17 @@ use std::fs;
 
 use anyhow::Context as _;
 use anyhow::Result;
+use powerpack::env;
 use serde::Deserialize;
 use serde_json as json;
 
 #[derive(Debug)]
 pub struct Config {
-    pub api_url: String,
-    pub api_token: String,
+    pub ph_base_url: String,
+    pub ph_api_url: String,
+    pub ph_api_token: String,
+    pub meili_url: String,
+    pub meili_key: String,
 }
 
 impl Config {
@@ -36,22 +40,33 @@ impl Config {
             path
         };
 
-        let mut rc: ArcRc = {
+        let rc: ArcRc = {
             let contents =
                 fs::read(&home).with_context(|| format!("failed to read {}", home.display()))?;
             json::from_slice(&contents).context("failed to parse JSON")?
         };
-        rc.config.default.push_str("api/");
 
-        let api_url = rc.config.default;
+        let ph_base_url = rc.config.default.trim_end_matches('/').to_owned();
 
-        let host = rc
+        let (ph_api_url, ph_api_token) = rc
             .hosts
-            .remove(&api_url)
-            .context("failed to find host config for default url")?;
+            .into_iter()
+            .next()
+            .map(|(ph_api_url, rc_host)| {
+                (ph_api_url.trim_end_matches('/').to_owned(), rc_host.token)
+            })
+            .context("failed to find host config")?;
 
-        let api_token = host.token;
+        let meili_url =
+            env::var("MEILI_URL").unwrap_or_else(|| "http://localhost:7700".to_string());
+        let meili_key = env::var("MEILI_KEY").unwrap_or_default();
 
-        Ok(Self { api_url, api_token })
+        Ok(Self {
+            ph_base_url,
+            ph_api_url,
+            ph_api_token,
+            meili_url,
+            meili_key,
+        })
     }
 }
