@@ -91,6 +91,8 @@ impl Diff {
             status: lookup(&r, "/fields/status/value").context("failed to extract `status`")?,
             author_id: lookup(&r, "/fields/authorPHID")
                 .context("failed to extract `authorPHID`")?,
+            repository_id: lookup(&r, "/fields/repositoryPHID")
+                .context("failed to extract `repositoryPHID`")?,
             updated_at: lookup(&r, "/fields/dateModified")
                 .context("failed to extract `dateModified`")?,
         })
@@ -206,10 +208,14 @@ pub fn repos(config: &Config) -> Result<Vec<Repo>> {
         .context("failed to fetch repos from cache")?;
 
     let parse = |r| -> Result<Repo> {
+        let monogram: String = lookup(&r, "/monogram").context("failed to extract `monogram`")?;
         Ok(Repo {
+            id: lookup(&r, "/phid").context("failed to extract `phid`")?,
             name: lookup(&r, "/name").context("failed to extract `name`")?,
             description: lookup(&r, "/description").context("failed to extract `description`")?,
             uri: lookup(&r, "/uri").context("failed to extract `uri`")?,
+            monogram_lower: monogram.to_lowercase(),
+            monogram,
         })
     };
 

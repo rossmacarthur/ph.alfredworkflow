@@ -33,6 +33,7 @@ const LOG_FILENAME: &str = concat!(PKG_NAME, "-", PKG_VERSION, ".log");
 struct Context {
     config: Config,
     users: HashMap<String, User>,
+    repos: HashMap<String, Repo>,
     now: jiff::Timestamp,
 }
 
@@ -71,9 +72,14 @@ fn run() -> Result<()> {
         .into_iter()
         .map(|u| (u.id.clone(), u))
         .collect();
+    let repos = ph::repos(&config)?
+        .into_iter()
+        .map(|r| (r.id.clone(), r))
+        .collect();
     let ctx = Context {
         config,
         users,
+        repos,
         now: jiff::Timestamp::now(),
     };
 
@@ -207,19 +213,27 @@ impl Command {
     }
 }
 
+struct ParsedQuery<'a> {
+    handles: Vec<&'a str>,
+    repos: Vec<&'a str>,
+    statuses: Vec<&'a str>,
+    not_statuses: Vec<&'a str>,
+    text: String,
+}
+
 fn build_query_filter(
     ctx: &Context,
     index: meili::Index,
     query: &str,
 ) -> Option<(String, Option<String>)> {
-    let (handles, statuses, not_statuses, text) = parse_query(query);
+    let q = parse_query(query);
 
     let mut conditions = Vec::new();
 
     if let Some(user_field) = index.user_field()
-        && !handles.is_empty()
+        && !q.handles.is_empty()
     {
-        let matching = ctx.handles_matching(&handles);
+        let matching = ctx.handles_matching(&q.handles);
         if matching.is_empty() {
             return None;
         }
@@ -228,10 +242,22 @@ fn build_query_filter(
         }
     }
 
-    if let Some(status_field) = index.status_field()
-        && !statuses.is_empty()
+    if let Some(repo_field) = index.repo_field()
+        && !q.repos.is_empty()
     {
-        let matching = index.statuses_matching(&statuses);
+        let matching = ctx.repos_matching(&q.repos);
+        if matching.is_empty() {
+            return None;
+        }
+        if let Some(cond) = filter_contains(repo_field, &matching, false) {
+            conditions.push(cond);
+        }
+    }
+
+    if let Some(status_field) = index.status_field()
+        && !q.statuses.is_empty()
+    {
+        let matching = index.statuses_matching(&q.statuses);
         if matching.is_empty() {
             return None;
         }
@@ -241,9 +267,9 @@ fn build_query_filter(
     }
 
     if let Some(status_field) = index.status_field()
-        && !not_statuses.is_empty()
+        && !q.not_statuses.is_empty()
     {
-        let matching = index.statuses_matching(&not_statuses);
+        let matching = index.statuses_matching(&q.not_statuses);
         if let Some(cond) = filter_contains(status_field, &matching, true) {
             conditions.push(cond);
         }
@@ -251,11 +277,12 @@ fn build_query_filter(
 
     let filter = conditions.join(" AND ");
 
-    Some((text, Some(filter)))
+    Some((q.text, Some(filter)))
 }
 
-fn parse_query(query: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>, String) {
+fn parse_query(query: &str) -> ParsedQuery<'_> {
     let mut handles = Vec::new();
+    let mut repos = Vec::new();
     let mut statuses = Vec::new();
     let mut not_statuses = Vec::new();
     let mut parts = Vec::new();
@@ -264,6 +291,10 @@ fn parse_query(query: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>, String) {
             && !handle.is_empty()
         {
             handles.push(handle);
+        } else if let Some(repo) = part.strip_prefix('#')
+            && !repo.is_empty()
+        {
+            repos.push(repo);
         } else if let Some(status) = part.strip_prefix("+")
             && !status.is_empty()
         {
@@ -276,7 +307,13 @@ fn parse_query(query: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>, String) {
             parts.push(part);
         }
     }
-    (handles, statuses, not_statuses, parts.join(" "))
+    ParsedQuery {
+        handles,
+        repos,
+        statuses,
+        not_statuses,
+        text: parts.join(" "),
+    }
 }
 
 fn filter_contains(field: &str, values: &[&str], not: bool) -> Option<String> {
@@ -299,7 +336,15 @@ impl Context {
     fn handles_matching(&self, prefixes: &[&str]) -> Vec<&str> {
         self.users
             .iter()
-            .filter(|(_, user)| prefixes.iter().any(|h| user.handle_lower.starts_with(*h)))
+            .filter(|(_, user)| prefixes.iter().any(|&h| user.handle_lower.starts_with(h)))
+            .map(|(id, _)| id.as_str())
+            .collect()
+    }
+
+    fn repos_matching(&self, prefixes: &[&str]) -> Vec<&str> {
+        self.repos
+            .iter()
+            .filter(|(_, repo)| prefixes.iter().any(|&p| repo.monogram_lower == p))
             .map(|(id, _)| id.as_str())
             .collect()
     }
@@ -310,6 +355,14 @@ impl meili::Index {
         match self {
             Self::Diffs => Some("author_id"),
             Self::Tasks => Some("owner_id"),
+            Self::Pages => None,
+        }
+    }
+
+    fn repo_field(&self) -> Option<&'static str> {
+        match self {
+            Self::Diffs => Some("repository_id"),
+            Self::Tasks => None,
             Self::Pages => None,
         }
     }
@@ -357,8 +410,18 @@ impl Diff {
             .get(&self.author_id)
             .map(|u| u.handle.as_str())
             .unwrap_or("unknown");
+        let repo = self
+            .repository_id
+            .as_ref()
+            .and_then(|id| ctx.repos.get(id))
+            .map(|r| r.monogram.as_str());
         let status = anycase::as_lower(self.status);
-        let subtitle = format!("{ago} by {author}, {status}");
+        let mut subtitle = format!("{ago} by {author}");
+        if let Some(repo) = repo {
+            write!(&mut subtitle, " in #{repo}").expect("fmt write to string never fails");
+        }
+        write!(&mut subtitle, ", {status}").expect("fmt write to string never fails");
+
         Item::new(format!("D{}: {}", self.id, self.title))
             .subtitle(subtitle)
             .arg(format!("{}/D{}", ctx.config.ph_base_url, self.id))
@@ -405,13 +468,14 @@ impl Repo {
     }
 
     fn into_item(self) -> Item {
-        let mut item = Item::new(self.name)
-            .arg(self.uri)
-            .icon(Icon::with_image("./assets/repo.png"));
-        if let Some(desc) = self.description {
-            item = item.subtitle(desc);
+        let subtitle = match self.description {
+            Some(desc) => format!("#{}: {desc}", self.monogram),
+            None => self.monogram,
         };
-        item
+        Item::new(self.name)
+            .arg(self.uri)
+            .subtitle(subtitle)
+            .icon(Icon::with_image("./assets/repo.png"))
     }
 }
 

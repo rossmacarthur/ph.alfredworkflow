@@ -47,6 +47,12 @@ For example:
 - `tasks +open` - Show only open tasks
 - `tasks +resolved` - Show only resolved tasks
 
+### Filtering by repository
+
+You can filter diffs by repository with the `#` prefix:
+For example:
+- `diffs #repo-name` - Show only diffs in the specified repository
+
 ## 📦 Installation
 
 ### Pre-packaged

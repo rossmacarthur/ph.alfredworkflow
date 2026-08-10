@@ -14,9 +14,12 @@ pub struct User {
 /// A repository
 #[derive(Debug, Clone)]
 pub struct Repo {
+    pub id: String,
     pub name: String,
     pub description: Option<String>,
     pub uri: String,
+    pub monogram: String,
+    pub monogram_lower: String,
 }
 
 /// A diff
@@ -26,6 +29,7 @@ pub struct Diff {
     pub title: String,
     pub author_id: String,
     pub status: String,
+    pub repository_id: Option<String>,
     pub updated_at: i64,
 }
 
@@ -77,7 +81,7 @@ impl Diff {
     pub fn settings() -> json::Value {
         json!({
             "searchableAttributes": ["title"],
-            "filterableAttributes": ["author_id", "status"],
+            "filterableAttributes": ["author_id", "status", "repository_id"],
             "rankingRules": ["rank:asc", "updated_at:desc", "words", "typo", "proximity", "attribute", "sort", "exactness"],
             "sortableAttributes": ["updated_at", "rank"],
         })
