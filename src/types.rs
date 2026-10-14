@@ -66,6 +66,19 @@ impl Diff {
         ]
     }
 
+    pub fn open_statuses() -> &'static [&'static str] {
+        &[
+            "needs-review",
+            "needs-revision",
+            "changes-planned",
+            "accepted",
+        ]
+    }
+
+    pub fn closed_statuses() -> &'static [&'static str] {
+        &["published", "abandoned"]
+    }
+
     pub fn rank(&self) -> u32 {
         match &*self.status {
             "needs-review" => 1,
@@ -98,6 +111,10 @@ impl Task {
             "duplicate",
             "spite",
         ]
+    }
+
+    pub fn closed_statuses() -> &'static [&'static str] {
+        &["resolved", "wontfix", "invalid", "duplicate", "spite"]
     }
 
     pub fn rank(&self) -> u32 {

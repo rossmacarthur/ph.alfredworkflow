@@ -33,19 +33,25 @@ You can filter diffs and tasks by user with the `@` prefix:
 
 ### Filtering by status
 
-You can filter diffs aed tasks by status using the `+` prefix:
+You can filter diffs and tasks by status using the `+` prefix, or exclude
+statuses using the `-` prefix:
 
 **Diffs:**
 
 For example:
 - `diffs +needs-review` - Show only diffs that need review
 - `diffs +accepted` - Show only accepted diffs
+- `diffs +open` - Show diffs needing review or revision, with changes planned, or accepted
+- `diffs +closed` - Show published or abandoned diffs
+- `diffs -closed` - Exclude published and abandoned diffs
 
 **Tasks:**
 
 For example:
 - `tasks +open` - Show only open tasks
 - `tasks +resolved` - Show only resolved tasks
+- `tasks +closed` - Show resolved, wontfix, invalid, duplicate, or spite tasks
+- `tasks -closed` - Exclude all of those closed task statuses
 
 ### Filtering by repository
 

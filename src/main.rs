@@ -375,18 +375,26 @@ impl meili::Index {
         }
     }
 
-    fn statuses(&self) -> &'static [&'static str] {
-        match self {
+    fn statuses_matching(&self, prefixes: &[&str]) -> Vec<&'static str> {
+        let statuses = match self {
             Self::Diffs => Diff::statuses(),
             Self::Tasks => Task::statuses(),
             Self::Pages => Page::statuses(),
-        }
-    }
-
-    fn statuses_matching(&self, prefixes: &[&str]) -> Vec<&'static str> {
-        self.statuses()
+        };
+        let (open, closed): (&[&str], &[&str]) = match self {
+            Self::Diffs => (Diff::open_statuses(), Diff::closed_statuses()),
+            Self::Tasks => (&[], Task::closed_statuses()),
+            Self::Pages => (&[], &[]),
+        };
+        statuses
             .iter()
-            .filter(|s| prefixes.iter().any(|p| s.starts_with(p)))
+            .filter(|s| {
+                prefixes.iter().any(|p| {
+                    s.starts_with(p)
+                        || ("open".starts_with(p) && open.contains(s))
+                        || ("closed".starts_with(p) && closed.contains(s))
+                })
+            })
             .copied()
             .collect()
     }
